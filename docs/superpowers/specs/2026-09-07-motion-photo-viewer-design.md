@@ -24,10 +24,24 @@ Testato su foto reale: https://flickr.com/photos/lorello/55391822566/
 
 Tutto locale, foto pubbliche, nessuna auth sul lato viewer.
 
+**Tech stack: Go 1.22+** (stdlib per HTTP/OAuth/JSON, `aws-sdk-go-v2` per R2 — vedi piano
+implementativo per la motivazione: binario statico singolo, footprint minimo, nessun
+runtime/interprete da gestire per un CLI a bassa frequenza d'uso).
+
 ```
 flickr-motion-photos/
-├── scanner.py          # CLI: scan + detect + extract + upload + tag + edit descrizione
-├── flickr_oauth.py      # OAuth 1.0a (request_token → authorize → access_token → firma chiamate)
+├── go.mod
+├── cmd/
+│   ├── scanner/main.go     # CLI: scan + detect + extract + upload + tag + edit descrizione
+│   └── authorize/main.go   # script one-off OAuth
+├── internal/
+│   ├── motiondetect/       # rilevamento motion photo + estrazione video
+│   ├── flickroauth/        # OAuth 1.0a (request_token → authorize → access_token → firma chiamate)
+│   ├── flickrclient/       # client Flickr API di alto livello
+│   ├── sitegen/            # rendering pagina viewer
+│   ├── r2upload/           # upload video su Cloudflare R2
+│   ├── gitpublish/         # commit + push pagine generate
+│   └── config/             # config da env vars
 ├── site/
 │   ├── template.html    # template pagina viewer singola foto (stile dark, tipo Flickr photo page)
 │   └── p/<photo_id>.html  # generata per ogni motion photo trovata
@@ -46,7 +60,7 @@ Nessun file di stato locale: lo stato vive sull'account Flickr stesso, portabile
 
 ### Flusso per ogni run
 
-1. `flickr.people.getPhotos` (autenticato) con `extras=tags` → lista foto pubbliche + tag già presenti, nessuna chiamata extra per lo stato
+1. `flickr.people.getPhotos` (autenticato) con `extras=tags`, **`privacy_filter=1`** (solo foto pubbliche — senza, l'account owner-autenticato vedrebbe anche private/friends&family) → lista foto pubbliche + tag già presenti, nessuna chiamata extra per lo stato
 2. filtra foto senza tag `flickrmp:status=*`
 3. per ogni foto candidata:
    a. `flickr.photos.getInfo` → `originalsecret`/`originalformat`
@@ -58,7 +72,7 @@ Nessun file di stato locale: lo stato vive sull'account Flickr stesso, portabile
    d. upload video su Cloudflare R2 (key = photo_id, overwrite idempotente, bucket pubblico con CORS aperto per `<video>`)
    e. genera `site/p/<photo_id>.html` da template (foto + video, stile dark Flickr-like)
    f. commit + push → GitHub Pages rebuilda
-   g. `flickr.photos.setMeta`: **solo se il link non è già presente in descrizione** (idempotenza), appende link alla descrizione esistente senza toccare testo utente
+   g. `flickr.photos.setMeta`: **solo se il link non è già presente in descrizione** (idempotenza), appende `"Motion-Photo viewer: questa è una foto motion, guardala su <url>"` alla descrizione esistente senza toccare testo utente
    h. `flickr.photos.addTags`: aggiunge `flickrmp:status=published` — **ultimo step**, garantisce che un crash a metà non lasci lo stato incoerente (rerun ritenta senza duplicare nulla grazie ai controlli idempotenti sui passi precedenti)
 
 ## Error handling
@@ -70,9 +84,9 @@ Nessun file di stato locale: lo stato vive sull'account Flickr stesso, portabile
 
 ## Testing
 
-Manuale, nessuna suite automatica (script CLI personale):
-1. `--dry-run --limit 5` su foto note motion → verifica detection
-2. run reale su quelle 5 → verifica pagina viewer, tag, descrizione su Flickr
+Unit test automatici per package (`go test ./...`, uno per modulo `internal/*`), più validazione manuale end-to-end (script CLI personale, non serve suite e2e automatica):
+1. `go run ./cmd/scanner --dry-run --limit 5` su foto note motion → verifica detection
+2. run reale su quelle 5 (`go run ./cmd/scanner --limit 5`, o binario compilato) → verifica pagina viewer, tag, descrizione su Flickr
 3. rerun stesso batch → verifica idempotenza (no duplicati)
 4. uso quotidiano: lancio manuale dopo ogni batch upload da Pixel
 

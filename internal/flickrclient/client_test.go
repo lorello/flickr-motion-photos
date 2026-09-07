@@ -1,0 +1,133 @@
+package flickrclient
+
+import (
+	"encoding/json"
+	"reflect"
+	"testing"
+)
+
+func makeClient() *Client {
+	return NewClient("ck", "cs", "", "")
+}
+
+func withUnsignedGet(t *testing.T, fn func(rawURL string, params map[string]string) (string, error)) {
+	t.Helper()
+	orig := unsignedGetFunc
+	unsignedGetFunc = fn
+	t.Cleanup(func() { unsignedGetFunc = orig })
+}
+
+func jsonBody(v map[string]interface{}) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+func TestCallRaisesOnFailStatus(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{"stat": "fail", "code": 1, "message": "boom"}), nil
+	})
+	client := makeClient()
+	_, err := client.Call("flickr.test.echo", nil)
+	if err == nil || err.Error() != "boom" {
+		t.Fatalf("expected error 'boom', got %v", err)
+	}
+}
+
+func TestCallReturnsParsedJSONOnSuccessUnauthenticated(t *testing.T) {
+	var capturedParams map[string]string
+	withUnsignedGet(t, func(_ string, params map[string]string) (string, error) {
+		capturedParams = params
+		return jsonBody(map[string]interface{}{"stat": "ok", "value": 42}), nil
+	})
+	client := makeClient()
+	result, err := client.Call("flickr.test.echo", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result["value"].(float64) != 42 {
+		t.Fatalf("unexpected value: %v", result["value"])
+	}
+	if capturedParams["api_key"] != "ck" {
+		t.Fatalf("expected api_key set, got %q", capturedParams["api_key"])
+	}
+}
+
+func TestGetPhotosPageExtractsIDTitleTagsWithoutPrivacyFilterWhenAnonymous(t *testing.T) {
+	var capturedParams map[string]string
+	withUnsignedGet(t, func(_ string, params map[string]string) (string, error) {
+		capturedParams = params
+		return jsonBody(map[string]interface{}{
+			"stat": "ok",
+			"photos": map[string]interface{}{
+				"photo": []interface{}{
+					map[string]interface{}{"id": "111", "title": "PXL_1.MP", "tags": "flickrmp:status=checked vacation"},
+					map[string]interface{}{"id": "222", "title": "PXL_2.MP", "tags": ""},
+				},
+			},
+		}), nil
+	})
+	client := makeClient()
+	photos, err := client.GetPhotosPage("65791659@N00", 1, 100)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []Photo{
+		{ID: "111", Title: "PXL_1.MP", Tags: []string{"flickrmp:status=checked", "vacation"}},
+		{ID: "222", Title: "PXL_2.MP", Tags: []string{}},
+	}
+	if !reflect.DeepEqual(photos, want) {
+		t.Fatalf("got %+v, want %+v", photos, want)
+	}
+	if _, ok := capturedParams["privacy_filter"]; ok {
+		t.Fatalf("expected no privacy_filter param when unauthenticated, got %q", capturedParams["privacy_filter"])
+	}
+}
+
+func TestGetPhotoOriginalURLFailsWithoutOAuthWhenFieldsMissing(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat":  "ok",
+			"photo": map[string]interface{}{"id": "999", "server": "65535", "usage": map[string]interface{}{"candownload": float64(0)}},
+		}), nil
+	})
+	client := makeClient()
+	_, err := client.GetPhotoOriginalURL("999")
+	if err == nil {
+		t.Fatal("expected error when originalsecret/originalformat are missing")
+	}
+}
+
+func TestFindUserIDByUsername(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat": "ok",
+			"user": map[string]interface{}{"nsid": "65791659@N00", "id": "65791659@N00"},
+		}), nil
+	})
+	client := makeClient()
+	nsid, err := client.FindUserIDByUsername("lorello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if nsid != "65791659@N00" {
+		t.Fatalf("got %s", nsid)
+	}
+}
+
+func TestAddTagCallsAddTags(t *testing.T) {
+	var capturedParams map[string]string
+	withUnsignedGet(t, func(_ string, params map[string]string) (string, error) {
+		capturedParams = params
+		return jsonBody(map[string]interface{}{"stat": "ok"}), nil
+	})
+	client := makeClient()
+	if err := client.AddTag("999", "flickrmp:status=published"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedParams["method"] != "flickr.photos.addTags" {
+		t.Fatalf("unexpected method: %s", capturedParams["method"])
+	}
+	if capturedParams["tags"] != `"flickrmp:status=published"` {
+		t.Fatalf("unexpected tags: %s", capturedParams["tags"])
+	}
+}
