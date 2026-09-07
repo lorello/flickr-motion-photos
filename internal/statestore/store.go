@@ -47,7 +47,7 @@ func NewFileStore(dir, userID string) (*FileStore, error) {
 
 	if raw, err := os.ReadFile(path); err == nil {
 		if err := json.Unmarshal(raw, &data); err != nil {
-			return nil, fmt.Errorf("cache corrotta in %s: %w", path, err)
+			return nil, fmt.Errorf("corrupt cache file %s: %w", path, err)
 		}
 	} else if !os.IsNotExist(err) {
 		return nil, err

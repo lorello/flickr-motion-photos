@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"motionphotos/internal/flickrclient"
@@ -85,7 +86,7 @@ func TestProcessPhotoSkipsIfAlreadyInCache(t *testing.T) {
 }
 
 func TestProcessPhotoBlockedWithoutOAuthDoesNotError(t *testing.T) {
-	reader := &fakeReader{originalErr: errors.New("originale non disponibile: serve OAuth owner-autenticato")}
+	reader := &fakeReader{originalErr: fmt.Errorf("foto 3 (candownload=0): %w", flickrclient.ErrOriginalNotAvailable)}
 	photo := flickrclient.Photo{ID: "3", Title: "t"}
 	store := newFakeStore(t)
 
@@ -98,6 +99,23 @@ func TestProcessPhotoBlockedWithoutOAuthDoesNotError(t *testing.T) {
 	}
 	if _, ok := store.Get("3"); ok {
 		t.Fatal("expected no cache entry when blocked, so it retries next run")
+	}
+}
+
+func TestProcessPhotoDownloadErrorDoesNotError(t *testing.T) {
+	reader := &fakeReader{originalErr: errors.New("original download failed: HTTP 502")}
+	photo := flickrclient.Photo{ID: "3b", Title: "t"}
+	store := newFakeStore(t)
+
+	status, err := ProcessPhoto(reader, &fakeWriter{}, &fakeUploader{}, &fakePublisher{}, store, "https://viewer.example.com", photo)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if status != "download-error" {
+		t.Fatalf("got %s", status)
+	}
+	if _, ok := store.Get("3b"); ok {
+		t.Fatal("expected no cache entry on transient error, so it retries next run")
 	}
 }
 

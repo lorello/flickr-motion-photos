@@ -2,6 +2,7 @@ package flickrclient
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 )
@@ -15,6 +16,13 @@ func withUnsignedGet(t *testing.T, fn func(rawURL string, params map[string]stri
 	orig := unsignedGetFunc
 	unsignedGetFunc = fn
 	t.Cleanup(func() { unsignedGetFunc = orig })
+}
+
+func withDownloadOriginal(t *testing.T, fn func(rawURL string) ([]byte, int, error)) {
+	t.Helper()
+	orig := downloadOriginalFunc
+	downloadOriginalFunc = fn
+	t.Cleanup(func() { downloadOriginalFunc = orig })
 }
 
 func jsonBody(v map[string]interface{}) string {
@@ -94,6 +102,54 @@ func TestGetPhotoOriginalURLFailsWithoutOAuthWhenFieldsMissing(t *testing.T) {
 	_, err := client.GetPhotoOriginalURL("999")
 	if err == nil {
 		t.Fatal("expected error when originalsecret/originalformat are missing")
+	}
+	if !errors.Is(err, ErrOriginalNotAvailable) {
+		t.Fatalf("expected ErrOriginalNotAvailable, got %v", err)
+	}
+}
+
+func TestGetPhotoOriginalBytesDownloadsFromResolvedURL(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat":  "ok",
+			"photo": map[string]interface{}{"id": "999", "server": "65535", "originalsecret": "abc123", "originalformat": "jpg"},
+		}), nil
+	})
+	var capturedURL string
+	withDownloadOriginal(t, func(rawURL string) ([]byte, int, error) {
+		capturedURL = rawURL
+		return []byte("JPEGBYTES"), 200, nil
+	})
+
+	client := makeClient()
+	data, err := client.GetPhotoOriginalBytes("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != "JPEGBYTES" {
+		t.Fatalf("got %q", data)
+	}
+	want := "https://live.staticflickr.com/65535/999_abc123_o.jpg"
+	if capturedURL != want {
+		t.Fatalf("got %s, want %s", capturedURL, want)
+	}
+}
+
+func TestGetPhotoOriginalBytesFailsOnNonOKStatus(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat":  "ok",
+			"photo": map[string]interface{}{"id": "999", "server": "65535", "originalsecret": "abc123", "originalformat": "jpg"},
+		}), nil
+	})
+	withDownloadOriginal(t, func(rawURL string) ([]byte, int, error) {
+		return []byte("<html>502 Bad Gateway</html>"), 502, nil
+	})
+
+	client := makeClient()
+	_, err := client.GetPhotoOriginalBytes("999")
+	if err == nil {
+		t.Fatal("expected error on non-200 download status")
 	}
 }
 

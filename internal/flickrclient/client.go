@@ -1,11 +1,14 @@
 package flickrclient
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -14,10 +17,49 @@ import (
 
 const apiURL = "https://api.flickr.com/services/rest"
 
+// ErrOriginalNotAvailable segnala che Flickr non espone originalsecret/
+// originalformat per questa foto — richiede un client autenticato come
+// owner (OAuth), a prescindere dal fatto che la foto sia pubblica.
+var ErrOriginalNotAvailable = errors.New("original not available: owner-authenticated OAuth required")
+
 // signedGetFunc, unsignedGetFunc e httpGetFunc permettono ai test di
 // sostituire il livello HTTP.
 var signedGetFunc = flickroauth.SignedGet
 var httpGetFunc = http.Get
+
+// downloadOriginalFunc scarica i byte dell'originale da live.staticflickr.com.
+// Implementazione di default: shell out a curl invece del client HTTP nativo
+// di Go. Verificato in sessione: il CDN di Flickr (CloudFront/WAF davanti a
+// live.staticflickr.com) risponde 502 "Error from cloudfront" a ripetizione
+// alle richieste fatte con lo stack TLS standard di Go (stesso URL, stessi
+// header, sia HTTP/1.1 che HTTP/2 — provato), ma accetta senza problemi la
+// stessa identica richiesta fatta da curl. Le chiamate JSON verso
+// api.flickr.com non sono affette, restano su httpGetFunc/unsignedGetFunc.
+// Iniettabile nei test.
+var downloadOriginalFunc = curlDownload
+
+func curlDownload(rawURL string) (body []byte, statusCode int, err error) {
+	cmd := exec.Command("curl", "-sS", "-w", "\n%{http_code}", rawURL)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, 0, fmt.Errorf("curl failed downloading %s: %w (stderr: %s)", rawURL, err, stderr.String())
+	}
+
+	output := stdout.Bytes()
+	idx := bytes.LastIndexByte(output, '\n')
+	if idx < 0 {
+		return nil, 0, fmt.Errorf("unexpected curl output for %s: no status code marker", rawURL)
+	}
+	respBody := output[:idx]
+	statusStr := strings.TrimSpace(string(output[idx+1:]))
+	status, convErr := strconv.Atoi(statusStr)
+	if convErr != nil {
+		return nil, 0, fmt.Errorf("unexpected curl status output %q for %s: %w", statusStr, rawURL, convErr)
+	}
+	return respBody, status, nil
+}
 
 // unsignedGetFunc esegue una GET pubblica con solo api_key, senza firma
 // OAuth. Usato per i metodi read-only su dati pubblici quando non e'
@@ -200,7 +242,7 @@ func (c *Client) GetPhotoOriginalURL(photoID string) (string, error) {
 	if secret == "" || format == "" {
 		usage, _ := info["usage"].(map[string]interface{})
 		candownload, _ := usage["candownload"].(float64)
-		return "", fmt.Errorf("originale non disponibile per la foto %s (candownload=%v): serve OAuth owner-autenticato", photoID, candownload)
+		return "", fmt.Errorf("photo %s (candownload=%v): %w", photoID, candownload, ErrOriginalNotAvailable)
 	}
 	return fmt.Sprintf("https://live.staticflickr.com/%s/%s_%s_o.%s", server, id, secret, format), nil
 }
@@ -210,12 +252,14 @@ func (c *Client) GetPhotoOriginalBytes(photoID string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := httpGetFunc(url)
+	body, status, err := downloadOriginalFunc(url)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("original download failed for %s: HTTP %d from %s", photoID, status, url)
+	}
+	return body, nil
 }
 
 func (c *Client) GetPhotoDescription(photoID string) (string, error) {

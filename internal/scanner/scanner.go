@@ -11,6 +11,7 @@
 package scanner
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -63,9 +64,11 @@ func alreadyTagged(tags []string) bool {
 
 // ProcessPhoto valuta una singola foto. Ritorna uno status descrittivo:
 // "skipped" (già nota, da Flickr tag o da cache locale), "checked"/"lost"/
-// "published" (esito del rilevamento), o "blocked-no-oauth" quando
-// l'originale non è scaricabile senza un access token OAuth (non fatale:
-// si ritenta al prossimo run, nessuno stato viene salvato).
+// "published" (esito del rilevamento), "blocked-no-oauth" quando l'originale
+// non è scaricabile senza un access token OAuth, o "download-error" per un
+// fallimento di rete/CDN transitorio (es. 502 da live.staticflickr.com).
+// Nessuno dei due casi di errore è fatale né viene salvato in cache: si
+// ritenta al prossimo run.
 func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Publisher, store statestore.Store, viewerBaseURL string, photo flickrclient.Photo) (string, error) {
 	if alreadyTagged(photo.Tags) {
 		return "skipped(flickr-tag)", nil
@@ -76,7 +79,10 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 
 	jpegBytes, err := reader.GetPhotoOriginalBytes(photo.ID)
 	if err != nil {
-		return "blocked-no-oauth", nil //nolint:nilerr // atteso finché non c'è un access token: si ritenta al prossimo run
+		if errors.Is(err, flickrclient.ErrOriginalNotAvailable) {
+			return "blocked-no-oauth", nil
+		}
+		return "download-error", nil //nolint:nilerr // transitorio (rete/CDN): si ritenta al prossimo run, non è un errore dello scanner
 	}
 
 	result := detectMotionPhotoFunc(jpegBytes)
