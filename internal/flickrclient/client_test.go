@@ -205,3 +205,59 @@ func TestAddTagCallsAddTags(t *testing.T) {
 		t.Fatalf("unexpected tags: %s", capturedParams["tags"])
 	}
 }
+
+func TestFindTagIDMatchesByRawOrContent(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat": "ok",
+			"photo": map[string]interface{}{
+				"tags": map[string]interface{}{
+					"tag": []interface{}{
+						map[string]interface{}{"id": "111-222", "raw": "flickrmp:status=published", "_content": "flickrmp:status=published"},
+						map[string]interface{}{"id": "333-444", "raw": "vacation", "_content": "vacation"},
+					},
+				},
+			},
+		}), nil
+	})
+	client := makeClient()
+	id, err := client.FindTagID("999", "flickrmp:status=published")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != "111-222" {
+		t.Fatalf("got %s", id)
+	}
+}
+
+func TestFindTagIDErrorsWhenNotFound(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat":  "ok",
+			"photo": map[string]interface{}{"tags": map[string]interface{}{"tag": []interface{}{}}},
+		}), nil
+	})
+	client := makeClient()
+	_, err := client.FindTagID("999", "flickrmp:status=published")
+	if err == nil {
+		t.Fatal("expected error when tag not found")
+	}
+}
+
+func TestRemoveTagCallsRemoveTagWithTagID(t *testing.T) {
+	var capturedParams map[string]string
+	withUnsignedGet(t, func(_ string, params map[string]string) (string, error) {
+		capturedParams = params
+		return jsonBody(map[string]interface{}{"stat": "ok"}), nil
+	})
+	client := makeClient()
+	if err := client.RemoveTag("999", "111-222"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedParams["method"] != "flickr.photos.removeTag" {
+		t.Fatalf("unexpected method: %s", capturedParams["method"])
+	}
+	if capturedParams["tag_id"] != "111-222" {
+		t.Fatalf("unexpected tag_id: %s", capturedParams["tag_id"])
+	}
+}

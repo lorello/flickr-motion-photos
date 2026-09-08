@@ -309,3 +309,35 @@ func (c *Client) AddTag(photoID, tag string) error {
 	})
 	return err
 }
+
+// FindTagID looks up the internal tag ID Flickr assigned to a tag whose
+// text matches tagContent on photoID. flickr.photos.removeTag needs this ID
+// (not the tag text) — this exists so a tag added via AddTag can be
+// reverted.
+func (c *Client) FindTagID(photoID, tagContent string) (string, error) {
+	info, err := c.getPhotoInfo(photoID)
+	if err != nil {
+		return "", err
+	}
+	tagsObj, _ := info["tags"].(map[string]interface{})
+	rawList, _ := tagsObj["tag"].([]interface{})
+	for _, item := range rawList {
+		t, _ := item.(map[string]interface{})
+		raw, _ := t["raw"].(string)
+		content, _ := t["_content"].(string)
+		if raw == tagContent || content == tagContent {
+			id, _ := t["id"].(string)
+			return id, nil
+		}
+	}
+	return "", fmt.Errorf("tag %q not found on photo %s", tagContent, photoID)
+}
+
+// RemoveTag removes a tag by its internal Flickr ID (from FindTagID).
+func (c *Client) RemoveTag(photoID, tagID string) error {
+	_, err := c.Call("flickr.photos.removeTag", map[string]string{
+		"photo_id": photoID,
+		"tag_id":   tagID,
+	})
+	return err
+}
