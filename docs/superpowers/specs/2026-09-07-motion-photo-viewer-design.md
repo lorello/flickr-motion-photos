@@ -72,7 +72,7 @@ Nessun file di stato locale: lo stato vive sull'account Flickr stesso, portabile
    d. upload video su Cloudflare R2 (key = photo_id, overwrite idempotente, bucket pubblico con CORS aperto per `<video>`)
    e. genera `site/p/<photo_id>.html` da template (foto + video, stile dark Flickr-like)
    f. commit + push → GitHub Pages rebuilda
-   g. `flickr.photos.setMeta`: **solo se il link non è già presente in descrizione** (idempotenza), appende `"Motion-Photo viewer: questa è una foto motion, guardala su <url>"` alla descrizione esistente senza toccare testo utente
+   g. `flickr.photos.setMeta`: **solo se il link non è già presente in descrizione** (idempotenza), appende `"This is a Motion Photo — watch the video: <url>"` alla descrizione esistente senza toccare testo utente
    h. `flickr.photos.addTags`: aggiunge `flickrmp:status=published` — **ultimo step**, garantisce che un crash a metà non lasci lo stato incoerente (rerun ritenta senza duplicare nulla grazie ai controlli idempotenti sui passi precedenti)
 
 ## Error handling

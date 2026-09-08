@@ -201,7 +201,7 @@ func TestProcessPhotoIdempotentSkipsDescriptionIfLinkAlreadyPresent(t *testing.T
 
 	reader := &fakeReader{
 		originalBytes: []byte("JPEGDATA"),
-		description:   "Motion-Photo viewer: questa è una foto motion, guardala su https://viewer.example.com/p/6.html",
+		description:   "This is a Motion Photo — watch the video: https://viewer.example.com/p/6.html",
 		displayURL:    "https://live.staticflickr.com/x/6_secret_b.jpg",
 	}
 	writer := &fakeWriter{}

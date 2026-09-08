@@ -128,7 +128,7 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		return "", err
 	}
 	if !strings.Contains(currentDescription, viewerURL) {
-		sentence := "Motion-Photo viewer: questa è una foto motion, guardala su " + viewerURL
+		sentence := "This is a Motion Photo — watch the video: " + viewerURL
 		newDescription := strings.TrimSpace(currentDescription + "\n\n" + sentence)
 		if err := writer.SetDescription(photo.ID, newDescription); err != nil {
 			return "", err
