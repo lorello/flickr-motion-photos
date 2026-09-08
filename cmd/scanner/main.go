@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"motionphotos/internal/flickrclient"
 	"motionphotos/internal/r2upload"
@@ -120,7 +121,7 @@ func main() {
 				fmt.Fprintln(os.Stderr, "error:", err)
 				os.Exit(1)
 			}
-			fmt.Printf("%s\t%s\t%s\n", photo.ID, status, photo.Title)
+			fmt.Printf("%s\t%s\t%s\t%s\n", time.Now().Format("15:04:05"), photo.ID, status, photo.Title)
 			if status != "skipped(flickr-tag)" && status != "skipped(cache)" {
 				processed++
 			}

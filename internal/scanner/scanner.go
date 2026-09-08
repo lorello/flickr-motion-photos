@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"motionphotos/internal/flickrclient"
 	"motionphotos/internal/motiondetect"
@@ -285,7 +286,7 @@ func Run(reader Reader, writer Writer, uploader Uploader, publisher Publisher, s
 			if err != nil {
 				return fmt.Errorf("photo %s: %w", photo.ID, err)
 			}
-			fmt.Printf("%s\t%s\t%s\n", photo.ID, status, photo.Title)
+			fmt.Printf("%s\t%s\t%s\t%s\n", time.Now().Format("15:04:05"), photo.ID, status, photo.Title)
 			if !strings.HasPrefix(status, "skipped") {
 				processed++
 			}

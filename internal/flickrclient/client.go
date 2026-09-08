@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -106,7 +107,10 @@ func (c *cdnCooldown) waitIfBlocked() {
 	until := c.blockedUntil
 	c.mu.Unlock()
 	if wait := time.Until(until); wait > 0 {
+		fmt.Fprintf(os.Stderr, "[%s] [COOLDOWN] rate-limited, sleeping %s until %s\n",
+			time.Now().Format("15:04:05"), wait.Round(time.Second), until.Format("15:04:05"))
 		sleepFunc(wait)
+		fmt.Fprintf(os.Stderr, "[%s] [COOLDOWN] resuming\n", time.Now().Format("15:04:05"))
 	}
 }
 
@@ -114,6 +118,7 @@ func (c *cdnCooldown) recordRateLimited() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.blockedUntil = time.Now().Add(c.nextBackoff)
+	fmt.Fprintf(os.Stderr, "[%s] [COOLDOWN] 429 received, next wait %s\n", time.Now().Format("15:04:05"), c.nextBackoff)
 	if c.nextBackoff < 30*time.Minute {
 		c.nextBackoff *= 2
 	}
