@@ -174,6 +174,7 @@ type PhotoDetails struct {
 	OwnerAvatarURL string
 	DateTaken      string
 	Tags           []string
+	Views          string
 }
 
 // GetPhotoDetails returns owner/avatar/date/tags for the viewer page.
@@ -211,7 +212,57 @@ func (c *Client) GetPhotoDetails(photoID string) (PhotoDetails, error) {
 		tags = append(tags, content)
 	}
 
-	return PhotoDetails{OwnerName: username, OwnerAvatarURL: avatarURL, DateTaken: dateTaken, Tags: tags}, nil
+	views, _ := info["views"].(string)
+
+	return PhotoDetails{OwnerName: username, OwnerAvatarURL: avatarURL, DateTaken: dateTaken, Tags: tags, Views: views}, nil
+}
+
+// PhotoExif carries camera/exposure info for the viewer page's "additional
+// information" panel. Requires a separate flickr.photos.getExif call (not
+// included in getInfo) — anonymous calls are rejected ("Permission
+// denied"), so this only works when the client is OAuth-authenticated.
+type PhotoExif struct {
+	Camera       string
+	ExposureTime string
+	FNumber      string
+	ISO          string
+	FocalLength  string
+}
+
+func (c *Client) GetPhotoExif(photoID string) (PhotoExif, error) {
+	result, err := c.Call("flickr.photos.getExif", map[string]string{"photo_id": photoID})
+	if err != nil {
+		return PhotoExif{}, err
+	}
+	photo, _ := result["photo"].(map[string]interface{})
+	camera, _ := photo["camera"].(string)
+
+	raw := map[string]string{}
+	exifList, _ := photo["exif"].([]interface{})
+	for _, item := range exifList {
+		e, _ := item.(map[string]interface{})
+		tag, _ := e["tag"].(string)
+		rawObj, _ := e["raw"].(map[string]interface{})
+		content, _ := rawObj["_content"].(string)
+		raw[tag] = content
+	}
+
+	fNumber := raw["FNumber"]
+	if fNumber != "" {
+		fNumber = "f/" + fNumber
+	}
+	iso := raw["ISO"]
+	if iso != "" {
+		iso = "ISO " + iso
+	}
+
+	return PhotoExif{
+		Camera:       camera,
+		ExposureTime: raw["ExposureTime"],
+		FNumber:      fNumber,
+		ISO:          iso,
+		FocalLength:  raw["FocalLength"],
+	}, nil
 }
 
 // FindUserIDByUsername risolve l'NSID di un utente da username pubblico

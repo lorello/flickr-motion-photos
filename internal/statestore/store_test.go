@@ -1,6 +1,7 @@
 package statestore
 
 import (
+	"sort"
 	"testing"
 )
 
@@ -63,5 +64,22 @@ func TestDifferentUserIDsUseDifferentFiles(t *testing.T) {
 	}
 	if storeA.Path() == storeB.Path() {
 		t.Fatalf("expected different cache file paths, got same: %s", storeA.Path())
+	}
+}
+
+func TestPhotoIDsByStatusFiltersCorrectly(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir, "user")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	store.Set("1", Record{Status: "published"})
+	store.Set("2", Record{Status: "checked"})
+	store.Set("3", Record{Status: "published"})
+
+	ids := store.PhotoIDsByStatus("published")
+	sort.Strings(ids)
+	if len(ids) != 2 || ids[0] != "1" || ids[1] != "3" {
+		t.Fatalf("got %v", ids)
 	}
 }

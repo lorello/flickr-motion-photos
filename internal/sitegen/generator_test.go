@@ -13,6 +13,14 @@ const testTemplate = `<!doctype html>
 {{if .OwnerName}}<div class="owner"><img src="{{.OwnerAvatarURL}}"><span>{{.OwnerName}}</span></div>{{end}}
 {{if .DateTaken}}<time>{{.DateTaken}}</time>{{end}}
 {{if .Tags}}<div class="tags">{{range .Tags}}<span class="tag">{{.}}</span>{{end}}</div>{{end}}
+{{if or .Views .Camera}}<div class="infopanel">
+{{if .Views}}<span>{{.Views}}</span>{{end}}
+{{if .Camera}}<span>{{.Camera}}</span>{{end}}
+{{if .ExposureTime}}<span>{{.ExposureTime}}</span>{{end}}
+{{if .FNumber}}<span>{{.FNumber}}</span>{{end}}
+{{if .ISO}}<span>{{.ISO}}</span>{{end}}
+{{if .FocalLength}}<span>{{.FocalLength}}</span>{{end}}
+</div>{{end}}
 `
 
 func TestRenderPhotoPageSubstitutesAllPlaceholders(t *testing.T) {
@@ -59,6 +67,44 @@ func TestRenderPhotoPageIncludesOwnerDateAndTagsWhenPresent(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Fatalf("expected output to contain %q, got: %s", want, html)
 		}
+	}
+}
+
+func TestRenderPhotoPageIncludesViewsAndExifWhenPresent(t *testing.T) {
+	html, err := RenderPhotoPage(testTemplate, PageData{
+		Title:        "t",
+		ImageURL:     "https://live.staticflickr.com/x/123_secret_b.jpg",
+		VideoURL:     "https://videos.example.com/123.mp4",
+		PhotoPageURL: "https://www.flickr.com/photos/lorello/123/",
+		Views:        "1033",
+		Camera:       "Google Pixel Fold",
+		ExposureTime: "1/1248",
+		FNumber:      "f/1.7",
+		ISO:          "ISO 44",
+		FocalLength:  "4.5 mm",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{"1033", "Google Pixel Fold", "1/1248", "f/1.7", "ISO 44", "4.5 mm"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected output to contain %q, got: %s", want, html)
+		}
+	}
+}
+
+func TestRenderPhotoPageOmitsInfopanelWhenAbsent(t *testing.T) {
+	html, err := RenderPhotoPage(testTemplate, PageData{
+		Title:        "t",
+		ImageURL:     "https://live.staticflickr.com/x/123_secret_b.jpg",
+		VideoURL:     "https://videos.example.com/123.mp4",
+		PhotoPageURL: "https://www.flickr.com/photos/lorello/123/",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(html, "infopanel") {
+		t.Fatalf("expected no infopanel when Views/Camera absent, got: %s", html)
 	}
 }
 

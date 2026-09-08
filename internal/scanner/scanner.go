@@ -11,6 +11,7 @@ package scanner
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"motionphotos/internal/flickrclient"
@@ -31,6 +32,7 @@ type Reader interface {
 	GetPhotoDisplayURL(photoID string) (string, error)
 	GetPhotoDescription(photoID string) (string, error)
 	GetPhotoDetails(photoID string) (flickrclient.PhotoDetails, error)
+	GetPhotoExif(photoID string) (flickrclient.PhotoExif, error)
 }
 
 // Writer scrive metadati su Flickr (setMeta/addTags). L'implementazione
@@ -113,6 +115,11 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		return "", err
 	}
 
+	// EXIF is supplementary (the "additional information" panel): if it
+	// fails (e.g. unauthenticated client — getExif rejects anonymous
+	// calls), degrade gracefully instead of failing the whole publish.
+	exif, _ := reader.GetPhotoExif(photo.ID)
+
 	html, err := sitegen.RenderPhotoPage(template, sitegen.PageData{
 		PhotoID:        photo.ID,
 		Title:          photo.Title,
@@ -123,6 +130,12 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		OwnerAvatarURL: details.OwnerAvatarURL,
 		DateTaken:      details.DateTaken,
 		Tags:           details.Tags,
+		Views:          details.Views,
+		Camera:         exif.Camera,
+		ExposureTime:   exif.ExposureTime,
+		FNumber:        exif.FNumber,
+		ISO:            exif.ISO,
+		FocalLength:    exif.FocalLength,
 	})
 	if err != nil {
 		return "", err
@@ -138,7 +151,8 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		return "", err
 	}
 	if !strings.Contains(currentDescription, viewerURL) {
-		sentence := "This is a Motion Photo — watch the video: " + viewerURL
+		descriptionLinkURL := viewerURL + "?utm_source=flickr&utm_medium=description&utm_campaign=motion_photo&utm_content=" + url.QueryEscape(username)
+		sentence := "This is a Motion Photo — watch the video: " + descriptionLinkURL
 		newDescription := strings.TrimSpace(currentDescription + "\n\n" + sentence)
 		if err := writer.SetDescription(photo.ID, newDescription); err != nil {
 			return "", err

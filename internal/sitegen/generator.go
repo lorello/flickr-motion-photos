@@ -20,6 +20,12 @@ type PageData struct {
 	OwnerAvatarURL string
 	DateTaken      string
 	Tags           []string
+	Views          string
+	Camera         string
+	ExposureTime   string
+	FNumber        string
+	ISO            string
+	FocalLength    string
 }
 
 // RenderPhotoPage renders template against data using html/template, which

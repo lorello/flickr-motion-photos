@@ -78,3 +78,18 @@ func (s *FileStore) Set(photoID string, r Record) error {
 func (s *FileStore) Path() string {
 	return s.path
 }
+
+// PhotoIDsByStatus ritorna gli ID delle foto in cache con lo status dato
+// (es. "published"), per strumenti di manutenzione (es. cmd/republish) che
+// devono rielaborare tutte le foto già pubblicate senza rifare la scansione.
+func (s *FileStore) PhotoIDsByStatus(status string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := make([]string, 0, len(s.data))
+	for id, r := range s.data {
+		if r.Status == status {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}

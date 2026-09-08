@@ -191,6 +191,37 @@
     font-size: 0.72rem;
     margin: 0 0 6px;
   }
+  .infopanel {
+    width: 100%;
+    background: #f5f5f5;
+    color: #222;
+    padding: 20px 24px;
+    box-sizing: border-box;
+    display: flex;
+    justify-content: center;
+  }
+  .infopanel table {
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    width: 100%;
+    max-width: 420px;
+  }
+  .infopanel th, .infopanel td {
+    text-align: left;
+    padding: 6px 0;
+    border-bottom: 1px solid #e0e0e0;
+  }
+  .infopanel th {
+    color: #777;
+    font-weight: 400;
+    width: 40%;
+  }
+  .infopanel td {
+    font-weight: 600;
+  }
+  .infopanel tr:last-child th, .infopanel tr:last-child td {
+    border-bottom: none;
+  }
 </style>
 </head>
 <body>
@@ -226,6 +257,18 @@
     </div>
     {{end}}
   </div>
+  {{if or .Views .Camera}}
+  <div class="infopanel">
+    <table>
+      {{if .Views}}<tr><th>Views</th><td>{{.Views}}</td></tr>{{end}}
+      {{if .Camera}}<tr><th>Camera</th><td>{{.Camera}}</td></tr>{{end}}
+      {{if .ExposureTime}}<tr><th>Exposure</th><td>{{.ExposureTime}}</td></tr>{{end}}
+      {{if .FNumber}}<tr><th>Aperture</th><td>{{.FNumber}}</td></tr>{{end}}
+      {{if .ISO}}<tr><th>ISO Speed</th><td>{{.ISO}}</td></tr>{{end}}
+      {{if .FocalLength}}<tr><th>Focal Length</th><td>{{.FocalLength}}</td></tr>{{end}}
+    </table>
+  </div>
+  {{end}}
   <footer>
     <p class="disclaimer">Built using the Flickr API. Not affiliated with, endorsed by, or a product of Flickr / SmugMug.</p>
     <a href="https://www.flickr.com/groups/14903850@N24/discuss/">Questions or bugs?</a>

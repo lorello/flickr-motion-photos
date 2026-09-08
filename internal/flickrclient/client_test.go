@@ -229,6 +229,7 @@ func TestGetPhotoDetailsExtractsOwnerAvatarDateAndFiltersInternalTags(t *testing
 					"iconserver": "5348", "iconfarm": float64(6),
 				},
 				"dates": map[string]interface{}{"taken": "2026-07-11 11:15:21"},
+				"views": "1033",
 				"tags": map[string]interface{}{
 					"tag": []interface{}{
 						map[string]interface{}{"_content": "vacation"},
@@ -253,6 +254,9 @@ func TestGetPhotoDetailsExtractsOwnerAvatarDateAndFiltersInternalTags(t *testing
 	if details.DateTaken != "2026-07-11 11:15:21" {
 		t.Fatalf("unexpected date taken: %s", details.DateTaken)
 	}
+	if details.Views != "1033" {
+		t.Fatalf("unexpected views: %s", details.Views)
+	}
 	if len(details.Tags) != 1 || details.Tags[0] != "vacation" {
 		t.Fatalf("expected only 'vacation' tag (internal flickrmp: tag filtered out), got %v", details.Tags)
 	}
@@ -276,6 +280,43 @@ func TestGetPhotoDetailsUsesDefaultAvatarWhenNoIconServer(t *testing.T) {
 	}
 	if details.OwnerAvatarURL != "https://www.flickr.com/images/buddyicon.gif" {
 		t.Fatalf("unexpected default avatar: %s", details.OwnerAvatarURL)
+	}
+}
+
+func TestGetPhotoExifExtractsCameraAndFormattedExposure(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat": "ok",
+			"photo": map[string]interface{}{
+				"camera": "Google Pixel Fold",
+				"exif": []interface{}{
+					map[string]interface{}{"tag": "ExposureTime", "raw": map[string]interface{}{"_content": "1/1248"}},
+					map[string]interface{}{"tag": "FNumber", "raw": map[string]interface{}{"_content": "1.7"}},
+					map[string]interface{}{"tag": "ISO", "raw": map[string]interface{}{"_content": "44"}},
+					map[string]interface{}{"tag": "FocalLength", "raw": map[string]interface{}{"_content": "4.5 mm"}},
+				},
+			},
+		}), nil
+	})
+	client := makeClient()
+	exif, err := client.GetPhotoExif("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if exif.Camera != "Google Pixel Fold" {
+		t.Fatalf("unexpected camera: %s", exif.Camera)
+	}
+	if exif.ExposureTime != "1/1248" {
+		t.Fatalf("unexpected exposure time: %s", exif.ExposureTime)
+	}
+	if exif.FNumber != "f/1.7" {
+		t.Fatalf("unexpected f-number: %s", exif.FNumber)
+	}
+	if exif.ISO != "ISO 44" {
+		t.Fatalf("unexpected iso: %s", exif.ISO)
+	}
+	if exif.FocalLength != "4.5 mm" {
+		t.Fatalf("unexpected focal length: %s", exif.FocalLength)
 	}
 }
 
