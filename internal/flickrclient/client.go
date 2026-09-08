@@ -74,12 +74,14 @@ var downloadOriginalFunc = curlDownload
 
 const (
 	// downloadThrottle: pausa proattiva prima di ogni download, per non
-	// bombardare il CDN durante una scansione di migliaia di foto.
-	downloadThrottle = 300 * time.Millisecond
-	// downloadMaxRetries: tentativi aggiuntivi su HTTP 429 (rate limit CDN),
-	// con backoff esponenziale (1s, 2s, 4s, 8s). Verificato in sessione: uno
-	// scan di ~2800 foto di seguito ha fatto scattare 429 sulla stragrande
-	// maggioranza dei download — throttle+retry sono necessari, non opzionali.
+	// bombardare il CDN durante una scansione di migliaia di foto. 300ms
+	// non è bastato: uno scan reale ci è rimasto dentro (429 costante,
+	// auto-alimentato dal nostro stesso traffico sostenuto — una singola
+	// richiesta isolata nel frattempo tornava 200 pulita). 1.5s è il primo
+	// valore che ha smesso di ritriggerare il limite in sessione.
+	downloadThrottle = 1500 * time.Millisecond
+	// downloadMaxRetries: tentativi aggiuntivi su HTTP 429, con backoff
+	// esponenziale (1s, 2s, 4s, 8s).
 	downloadMaxRetries = 4
 )
 
