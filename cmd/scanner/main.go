@@ -1,10 +1,10 @@
 // cmd/scanner: CLI that scans a user's public Flickr photos, detects Pixel
 // Motion Photos, uploads extracted videos and generated viewer pages to a
-// Cloudflare R2 bucket, and reports what it would write to Flickr.
+// Cloudflare R2 bucket, and writes the viewer link into the photo's Flickr
+// description + a status tag.
 //
-// Flickr writes (setMeta/addTags) are still simulated (SimulatingWriter):
-// real R2 upload + page publishing are wired in, but editing live Flickr
-// photo descriptions/tags is a separate, explicit step not yet enabled here.
+// Real writes by default — pass --dry-run to simulate (SimulatingWriter)
+// instead of writing to Flickr for real.
 package main
 
 import (
@@ -25,6 +25,8 @@ func main() {
 	limit := flag.Int("limit", 10, "Maximum number of photos to process (-1 = unlimited)")
 	cacheDir := flag.String("cache-dir", os.TempDir(), "Local state cache directory")
 	repoRoot := flag.String("repo-root", ".", "Repository root containing site/template.html")
+	photosetID := flag.String("photoset-id", "", "If set, scan only this album instead of the whole photostream")
+	dryRun := flag.Bool("dry-run", false, "Simulate Flickr description/tag writes instead of writing for real")
 	flag.Parse()
 
 	apiKey := os.Getenv("FLICKRGO_API_KEY")
@@ -88,9 +90,39 @@ func main() {
 	}
 	fmt.Fprintf(os.Stderr, "[INFO] state cache: %s\n", store.Path())
 
-	writer := scanner.SimulatingWriter{}
+	var writer scanner.Writer = client
+	if *dryRun {
+		fmt.Fprintln(os.Stderr, "[INFO] --dry-run: Flickr description/tag writes will be simulated, not real.")
+		writer = scanner.SimulatingWriter{}
+	} else {
+		fmt.Fprintln(os.Stderr, "[INFO] Flickr description/tags will be written for real (pass --dry-run to simulate).")
+	}
 	uploader := r2upload.VideoUploader{Client: r2Client, Bucket: r2Bucket, PublicBaseURL: r2PublicBaseURL}
 	publisher := r2upload.PageUploader{Client: r2Client, Bucket: r2Bucket, PublicBaseURL: r2PublicBaseURL}
+
+	if *photosetID != "" {
+		photos, err := client.GetPhotosetPhotos(*photosetID, 1, 500)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error listing photoset:", err)
+			os.Exit(1)
+		}
+		processed := 0
+		for _, photo := range photos {
+			if *limit >= 0 && processed >= *limit {
+				break
+			}
+			status, err := scanner.ProcessPhoto(client, writer, uploader, publisher, store, string(templateBytes), *username, photo)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "error:", err)
+				os.Exit(1)
+			}
+			fmt.Printf("%s\t%s\t%s\n", photo.ID, status, photo.Title)
+			if status != "skipped(flickr-tag)" && status != "skipped(cache)" {
+				processed++
+			}
+		}
+		return
+	}
 
 	if err := scanner.Run(client, writer, uploader, publisher, store, userID, *username, string(templateBytes), *limit); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)

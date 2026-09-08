@@ -91,6 +91,37 @@ func TestGetPhotosPageExtractsIDTitleTagsWithoutPrivacyFilterWhenAnonymous(t *te
 	}
 }
 
+func TestGetPhotosetPhotosExtractsIDTitleTags(t *testing.T) {
+	var capturedParams map[string]string
+	withUnsignedGet(t, func(_ string, params map[string]string) (string, error) {
+		capturedParams = params
+		return jsonBody(map[string]interface{}{
+			"stat": "ok",
+			"photoset": map[string]interface{}{
+				"id": "72177720334659015",
+				"photo": []interface{}{
+					map[string]interface{}{"id": "333", "title": "PXL_3.MP", "tags": "flickrmp:status=checked"},
+				},
+			},
+		}), nil
+	})
+	client := makeClient()
+	photos, err := client.GetPhotosetPhotos("72177720334659015", 1, 100)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []Photo{{ID: "333", Title: "PXL_3.MP", Tags: []string{"flickrmp:status=checked"}}}
+	if !reflect.DeepEqual(photos, want) {
+		t.Fatalf("got %+v, want %+v", photos, want)
+	}
+	if capturedParams["method"] != "flickr.photosets.getPhotos" {
+		t.Fatalf("unexpected method: %s", capturedParams["method"])
+	}
+	if capturedParams["photoset_id"] != "72177720334659015" {
+		t.Fatalf("unexpected photoset_id: %s", capturedParams["photoset_id"])
+	}
+}
+
 func TestGetPhotoOriginalURLFailsWithoutOAuthWhenFieldsMissing(t *testing.T) {
 	withUnsignedGet(t, func(string, map[string]string) (string, error) {
 		return jsonBody(map[string]interface{}{

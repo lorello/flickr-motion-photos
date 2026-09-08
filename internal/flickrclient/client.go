@@ -196,10 +196,28 @@ func (c *Client) GetPhotosPage(userID string, page, perPage int) ([]Photo, error
 	if err != nil {
 		return nil, err
 	}
-
 	photosObj, _ := result["photos"].(map[string]interface{})
-	rawList, _ := photosObj["photo"].([]interface{})
+	return parsePhotoList(photosObj), nil
+}
 
+// GetPhotosetPhotos restituisce le foto di un album (photoset) specifico.
+func (c *Client) GetPhotosetPhotos(photosetID string, page, perPage int) ([]Photo, error) {
+	params := map[string]string{
+		"photoset_id": photosetID,
+		"extras":      "tags",
+		"page":        strconv.Itoa(page),
+		"per_page":    strconv.Itoa(perPage),
+	}
+	result, err := c.Call("flickr.photosets.getPhotos", params)
+	if err != nil {
+		return nil, err
+	}
+	photosetObj, _ := result["photoset"].(map[string]interface{})
+	return parsePhotoList(photosetObj), nil
+}
+
+func parsePhotoList(container map[string]interface{}) []Photo {
+	rawList, _ := container["photo"].([]interface{})
 	photos := make([]Photo, 0, len(rawList))
 	for _, item := range rawList {
 		p, _ := item.(map[string]interface{})
@@ -212,7 +230,7 @@ func (c *Client) GetPhotosPage(userID string, page, perPage int) ([]Photo, error
 		}
 		photos = append(photos, Photo{ID: id, Title: title, Tags: tags})
 	}
-	return photos, nil
+	return photos
 }
 
 // PageCount legge photos.pages dall'ultima risposta getPhotos (per Run).
