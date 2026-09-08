@@ -22,7 +22,7 @@ import (
 
 func main() {
 	username := flag.String("username", "lorello", "Flickr username to scan")
-	limit := flag.Int("limit", 10, "Maximum number of photos to process (-1 = unlimited)")
+	limit := flag.Int("limit", -1, "Maximum number of photos to process (-1 = unlimited, the default)")
 	cacheDir := flag.String("cache-dir", os.TempDir(), "Local state cache directory")
 	repoRoot := flag.String("repo-root", ".", "Repository root containing site/template.html")
 	photosetID := flag.String("photoset-id", "", "If set, scan only this album instead of the whole photostream")
