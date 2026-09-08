@@ -17,6 +17,7 @@ import (
 
 	"motionphotos/internal/flickrclient"
 	"motionphotos/internal/motiondetect"
+	"motionphotos/internal/plausible"
 	"motionphotos/internal/sitegen"
 	"motionphotos/internal/statestore"
 )
@@ -102,6 +103,21 @@ type Publisher interface {
 // detectMotionPhotoFunc è iniettabile nei test.
 var detectMotionPhotoFunc = motiondetect.DetectMotionPhoto
 
+// getPageViewsFunc è nil finché EnablePlausible non viene chiamata (feature
+// opzionale: senza chiave configurata, PageViews resta vuoto e la riga
+// stats semplicemente non la mostra).
+var getPageViewsFunc func(path string) (visitors, pageviews int, err error)
+
+// EnablePlausible collega le letture di pageview da Plausible per la riga
+// stats della pagina (distinte dal contatore "Views" di Flickr, che conta
+// le visite alla FOTO su Flickr, non a questa pagina). Opzionale — se non
+// chiamata, il campo PageViews resta sempre vuoto.
+func EnablePlausible(apiKey, siteID string) {
+	getPageViewsFunc = func(path string) (int, int, error) {
+		return plausible.GetPageViews(apiKey, siteID, path)
+	}
+}
+
 func alreadyTagged(tags []string) bool {
 	for _, t := range tags {
 		if strings.HasPrefix(t, statusTagPrefix) {
@@ -176,6 +192,14 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		mapEmbedURL, _ = BuildMapEmbedURL(lat, lon)
 	}
 
+	var pageViews string
+	if getPageViewsFunc != nil {
+		path := fmt.Sprintf("/photos/%s/%s.html", username, photo.ID)
+		if _, views, pvErr := getPageViewsFunc(path); pvErr == nil {
+			pageViews = strconv.Itoa(views)
+		}
+	}
+
 	// Fetched before rendering: the page shows the owner's *original*
 	// caption (StripOwnSentence removes our own appended sentence, which
 	// would be circular to show on the very page that IS the video), and
@@ -198,6 +222,7 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		DateUploaded:     details.DateUploaded,
 		Tags:             details.Tags,
 		Views:            details.Views,
+		PageViews:        pageViews,
 		Comments:         details.Comments,
 		Favorites:        favorites,
 		LicenseName:      details.LicenseName,

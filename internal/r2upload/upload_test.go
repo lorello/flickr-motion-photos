@@ -42,7 +42,7 @@ func TestPutObjectSetsKeyBodyAndContentType(t *testing.T) {
 	}
 }
 
-func TestVideoUploaderUsesMP4KeyAndContentType(t *testing.T) {
+func TestVideoUploaderUsesFlatKeyAndContentType(t *testing.T) {
 	fake := &fakePutObjectAPI{}
 	u := VideoUploader{Client: fake, Bucket: "bucket", PublicBaseURL: "https://videos.example.com"}
 	url, err := u.UploadVideo("999", []byte("V"))
@@ -57,20 +57,20 @@ func TestVideoUploaderUsesMP4KeyAndContentType(t *testing.T) {
 	}
 }
 
-func TestPageUploaderUsesPPrefixKeyAndHTMLContentType(t *testing.T) {
+func TestPageUploaderUsesUsernamePrefixedKeyAndHTMLContentType(t *testing.T) {
 	fake := &fakePutObjectAPI{}
-	p := PageUploader{Client: fake, Bucket: "bucket", PublicBaseURL: "https://videos.example.com"}
+	p := PageUploader{Client: fake, Bucket: "bucket", PublicBaseURL: "https://videos.example.com", Username: "lorello"}
 	url, err := p.PublishPage("999", "<html></html>")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if *fake.gotInput.Key != "p/999.html" {
+	if *fake.gotInput.Key != "photos/lorello/999.html" {
 		t.Fatalf("unexpected key: %s", *fake.gotInput.Key)
 	}
 	if *fake.gotInput.ContentType != "text/html; charset=utf-8" {
 		t.Fatalf("unexpected content type: %s", *fake.gotInput.ContentType)
 	}
-	if url != "https://videos.example.com/p/999.html" {
+	if url != "https://videos.example.com/photos/lorello/999.html" {
 		t.Fatalf("unexpected url: %s", url)
 	}
 }

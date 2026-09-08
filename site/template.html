@@ -329,11 +329,12 @@
         <span class="badge">Motion Photo</span>
         {{if .DateTaken}}<time>{{.DateTaken}}</time>{{end}}
       </div>
-      {{if or .Views .Favorites .Comments}}
+      {{if or .Views .Favorites .Comments .PageViews}}
       <div class="stats">
         {{if .Views}}<span>{{.Views}} views</span>{{end}}
         {{if .Favorites}}<span>{{.Favorites}} faves</span>{{end}}
         {{if .Comments}}<span>{{.Comments}} comments</span>{{end}}
+        {{if .PageViews}}<span>{{.PageViews}} page views</span>{{end}}
       </div>
       {{end}}
       {{if .Tags}}

@@ -23,6 +23,7 @@ type PageData struct {
 	DateUploaded     string
 	Tags             []string
 	Views            string
+	PageViews        string // Plausible pageviews on this viewer page itself (distinct from Flickr's own Views), optional
 	Comments         string
 	Favorites        string
 	LicenseName      string

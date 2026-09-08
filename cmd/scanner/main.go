@@ -98,7 +98,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, "[INFO] Flickr description/tags will be written for real (pass --dry-run to simulate).")
 	}
 	uploader := r2upload.VideoUploader{Client: r2Client, Bucket: r2Bucket, PublicBaseURL: r2PublicBaseURL}
-	publisher := r2upload.PageUploader{Client: r2Client, Bucket: r2Bucket, PublicBaseURL: r2PublicBaseURL}
+	publisher := r2upload.PageUploader{Client: r2Client, Bucket: r2Bucket, PublicBaseURL: r2PublicBaseURL, Username: *username}
+
+	if plausibleKey, plausibleSite := os.Getenv("PLAUSIBLE_API_KEY"), os.Getenv("PLAUSIBLE_SITE_ID"); plausibleKey != "" && plausibleSite != "" {
+		scanner.EnablePlausible(plausibleKey, plausibleSite)
+	}
 
 	if *photosetID != "" {
 		photos, err := client.GetPhotosetPhotos(*photosetID, 1, 500)

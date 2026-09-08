@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 
 	"motionphotos/internal/flickrclient"
+	"motionphotos/internal/plausible"
 	"motionphotos/internal/r2upload"
 	"motionphotos/internal/scanner"
 	"motionphotos/internal/sitegen"
@@ -56,7 +57,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error creating R2 client:", err)
 		os.Exit(1)
 	}
-	publisher := r2upload.PageUploader{Client: r2Client, Bucket: r2Bucket, PublicBaseURL: r2PublicBaseURL}
+	publisher := r2upload.PageUploader{Client: r2Client, Bucket: r2Bucket, PublicBaseURL: r2PublicBaseURL, Username: *username}
+
+	plausibleKey, plausibleSite := os.Getenv("PLAUSIBLE_API_KEY"), os.Getenv("PLAUSIBLE_SITE_ID")
 
 	templateBytes, err := os.ReadFile(filepath.Join(*repoRoot, "site", "template.html"))
 	if err != nil {
@@ -120,6 +123,14 @@ func main() {
 			continue
 		}
 
+		var pageViews string
+		if plausibleKey != "" && plausibleSite != "" {
+			path := fmt.Sprintf("/photos/%s/%s.html", *username, photoID)
+			if _, views, pvErr := plausible.GetPageViews(plausibleKey, plausibleSite, path); pvErr == nil {
+				pageViews = fmt.Sprintf("%d", views)
+			}
+		}
+
 		html, err := sitegen.RenderPhotoPage(string(templateBytes), sitegen.PageData{
 			PhotoID:          photoID,
 			Title:            title,
@@ -133,6 +144,7 @@ func main() {
 			DateUploaded:     details.DateUploaded,
 			Tags:             details.Tags,
 			Views:            details.Views,
+			PageViews:        pageViews,
 			Comments:         details.Comments,
 			Favorites:        favorites,
 			LicenseName:      details.LicenseName,
