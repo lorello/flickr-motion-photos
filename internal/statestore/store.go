@@ -20,7 +20,12 @@ import (
 // Record è quello che sappiamo su una foto già processata in un run
 // precedente.
 type Record struct {
-	Status string `json:"status"` // "checked" | "published" | "lost"
+	Status string `json:"status"` // "checked" | "published" | "lost" | "ready-private"
+	// VideoURL è popolato solo per "ready-private": il video è già stato
+	// estratto e caricato su R2 mentre la foto era ancora privata, così
+	// quando diventerà pubblica non serve riscaricare l'originale da
+	// Flickr (costoso, soggetto a rate limit) per finire la pubblicazione.
+	VideoURL string `json:"video_url,omitempty"`
 }
 
 // Store è l'interfaccia consumata dallo scanner: get/set per photo ID.

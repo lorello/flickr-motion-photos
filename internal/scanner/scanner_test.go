@@ -18,6 +18,8 @@ type fakeReader struct {
 	originalErr   error
 	description   string
 	displayURL    string
+	private       bool // zero value = public, matching the common case in tests
+	visibilityErr error
 }
 
 func (f *fakeReader) GetPhotosPage(userID string, page, perPage int) ([]flickrclient.Photo, error) {
@@ -42,6 +44,9 @@ func (f *fakeReader) GetPhotoGeo(photoID string) (string, string, bool, error) {
 }
 func (f *fakeReader) GetPhotoGroups(photoID string) ([]string, error) { return nil, nil }
 func (f *fakeReader) GetPhotoPeople(photoID string) ([]string, error) { return nil, nil }
+func (f *fakeReader) GetPhotoVisibility(photoID string) (bool, error) {
+	return !f.private, f.visibilityErr
+}
 
 type fakeWriter struct {
 	setDescriptionCalls []string
@@ -203,6 +208,105 @@ func TestProcessPhotoPublishedFullFlowSimulated(t *testing.T) {
 		t.Fatalf("unexpected add tag calls: %v", writer.addTagCalls)
 	}
 	if r, ok := store.Get("5"); !ok || r.Status != "published" {
+		t.Fatalf("expected cache entry published, got %+v (ok=%v)", r, ok)
+	}
+}
+
+func TestProcessPhotoMotionButPrivateDefersPublishing(t *testing.T) {
+	orig := detectMotionPhotoFunc
+	detectMotionPhotoFunc = func([]byte) motiondetect.Result {
+		return motiondetect.Result{IsMotion: true, VideoBytes: []byte("VIDEO"), Reason: "published"}
+	}
+	t.Cleanup(func() { detectMotionPhotoFunc = orig })
+
+	reader := &fakeReader{originalBytes: []byte("JPEGDATA"), private: true}
+	writer := &fakeWriter{}
+	uploader := &fakeUploader{}
+	publisher := &fakePublisher{}
+	store := newFakeStore(t)
+	photo := flickrclient.Photo{ID: "7", Title: "PXL_7.MP"}
+
+	status, viewerURL, err := ProcessPhoto(reader, writer, uploader, publisher, store, testTemplate, testUsername, photo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != "ready(private)" {
+		t.Fatalf("got %s", status)
+	}
+	if viewerURL != "" {
+		t.Fatalf("expected no viewerURL while private, got %s", viewerURL)
+	}
+	if !uploader.called {
+		t.Fatal("expected the video to be extracted and uploaded even while private")
+	}
+	if publisher.called {
+		t.Fatal("expected no page publish while private")
+	}
+	if len(writer.setDescriptionCalls) != 0 || len(writer.addTagCalls) != 0 {
+		t.Fatal("expected no Flickr writes while private")
+	}
+	r, ok := store.Get("7")
+	if !ok || r.Status != "ready-private" || r.VideoURL != "https://videos.example.com/7.mp4" {
+		t.Fatalf("expected ready-private cache entry with VideoURL, got %+v (ok=%v)", r, ok)
+	}
+}
+
+func TestProcessPhotoReadyPrivateStillPrivateSkipsCheaply(t *testing.T) {
+	reader := &fakeReader{private: true}
+	uploader := &fakeUploader{}
+	publisher := &fakePublisher{}
+	store := newFakeStore(t)
+	store.Set("8", statestore.Record{Status: "ready-private", VideoURL: "https://videos.example.com/8.mp4"})
+	photo := flickrclient.Photo{ID: "8", Title: "PXL_8.MP"}
+
+	status, _, err := ProcessPhoto(reader, &fakeWriter{}, uploader, publisher, store, testTemplate, testUsername, photo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != "skipped(still-private)" {
+		t.Fatalf("got %s", status)
+	}
+	if uploader.called {
+		t.Fatal("expected no re-download/re-upload on recheck")
+	}
+	if publisher.called {
+		t.Fatal("expected no publish while still private")
+	}
+}
+
+func TestProcessPhotoReadyPrivateNowPublicFinishesPublishing(t *testing.T) {
+	reader := &fakeReader{
+		private:     false,
+		description: "Original caption",
+		displayURL:  "https://live.staticflickr.com/x/9_secret_b.jpg",
+	}
+	writer := &fakeWriter{}
+	uploader := &fakeUploader{}
+	publisher := &fakePublisher{}
+	store := newFakeStore(t)
+	store.Set("9", statestore.Record{Status: "ready-private", VideoURL: "https://videos.example.com/9.mp4"})
+	photo := flickrclient.Photo{ID: "9", Title: "PXL_9.MP"}
+
+	status, viewerURL, err := ProcessPhoto(reader, writer, uploader, publisher, store, testTemplate, testUsername, photo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != "published" {
+		t.Fatalf("got %s", status)
+	}
+	if viewerURL != "https://viewer.example.com/p/9.html" {
+		t.Fatalf("unexpected viewerURL: %s", viewerURL)
+	}
+	if uploader.called {
+		t.Fatal("expected no re-upload, videoURL reused from cache")
+	}
+	if !publisher.called {
+		t.Fatal("expected the page to be published now that the photo is public")
+	}
+	if len(writer.setDescriptionCalls) != 1 {
+		t.Fatalf("expected 1 set_description call, got %d", len(writer.setDescriptionCalls))
+	}
+	if r, ok := store.Get("9"); !ok || r.Status != "published" {
 		t.Fatalf("expected cache entry published, got %+v (ok=%v)", r, ok)
 	}
 }

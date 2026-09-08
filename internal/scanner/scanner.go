@@ -82,6 +82,7 @@ type Reader interface {
 	GetPhotoGeo(photoID string) (lat, lon string, hasGeo bool, err error)
 	GetPhotoGroups(photoID string) ([]string, error)
 	GetPhotoPeople(photoID string) ([]string, error)
+	GetPhotoVisibility(photoID string) (bool, error)
 }
 
 // Writer scrive metadati su Flickr (setMeta/addTags). L'implementazione
@@ -132,17 +133,32 @@ func alreadyTagged(tags []string) bool {
 // ProcessPhoto valuta una singola foto. Ritorna uno status descrittivo:
 // "skipped" (già nota, da Flickr tag o da cache locale), "checked"/"lost"/
 // "published" (esito del rilevamento), "blocked-no-oauth" quando l'originale
-// non è scaricabile senza un access token OAuth, o "download-error" per un
-// fallimento di rete/CDN transitorio (es. 502 da live.staticflickr.com).
-// Nessuno dei due casi di errore è fatale né viene salvato in cache: si
-// ritenta al prossimo run. viewerURL è non vuoto solo quando status è
-// "published" — utile per il logging del chiamante.
+// non è scaricabile senza un access token OAuth, "download-error" per un
+// fallimento di rete/CDN transitorio (es. 502 da live.staticflickr.com),
+// "ready(private)" quando è motion ma la foto è ancora privata (video
+// estratto e già su R2, pagina NON pubblicata — vedi GetPhotoVisibility),
+// o "skipped(still-private)" per un "ready(private)" ricontrollato che è
+// ancora privato. Nessuno dei due casi di errore transitorio è fatale né
+// viene salvato in cache: si ritenta al prossimo run. viewerURL è non
+// vuoto solo quando status è "published" — utile per il logging del
+// chiamante.
 func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Publisher, store statestore.Store, template, username string, photo flickrclient.Photo) (status string, viewerURL string, err error) {
 	if alreadyTagged(photo.Tags) {
 		return "skipped(flickr-tag)", "", nil
 	}
-	if _, ok := store.Get(photo.ID); ok {
-		return "skipped(cache)", "", nil
+
+	if rec, ok := store.Get(photo.ID); ok {
+		if rec.Status != "ready-private" {
+			return "skipped(cache)", "", nil
+		}
+		isPublic, err := reader.GetPhotoVisibility(photo.ID)
+		if err != nil {
+			return "", "", err
+		}
+		if !isPublic {
+			return "skipped(still-private)", "", nil
+		}
+		return finishPublish(reader, writer, publisher, store, template, username, photo, rec.VideoURL)
 	}
 
 	jpegBytes, err := reader.GetPhotoOriginalBytes(photo.ID)
@@ -170,6 +186,29 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		return "", "", err
 	}
 
+	isPublic, err := reader.GetPhotoVisibility(photo.ID)
+	if err != nil {
+		return "", "", err
+	}
+	if !isPublic {
+		// Video already extracted and uploaded — cheap to finish publishing
+		// later (GetPhotoVisibility only, no re-download) once the owner
+		// makes the photo public. Not tagged: alreadyTagged must stay
+		// false so this photo keeps getting the cheap recheck each run.
+		if err := store.Set(photo.ID, statestore.Record{Status: "ready-private", VideoURL: videoURL}); err != nil {
+			return "", "", err
+		}
+		return "ready(private)", "", nil
+	}
+
+	return finishPublish(reader, writer, publisher, store, template, username, photo, videoURL)
+}
+
+// finishPublish renders and publishes the viewer page for a motion photo
+// whose video is already on R2 (videoURL), then writes the description
+// link and status tag. Shared by ProcessPhoto's direct-publish path and
+// its "was private, now public" resume path.
+func finishPublish(reader Reader, writer Writer, publisher Publisher, store statestore.Store, template, username string, photo flickrclient.Photo, videoURL string) (string, string, error) {
 	imageURL, err := reader.GetPhotoDisplayURL(photo.ID)
 	if err != nil {
 		return "", "", err
@@ -243,7 +282,7 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		return "", "", err
 	}
 
-	viewerURL, err = publisher.PublishPage(photo.ID, pageHTML)
+	viewerURL, err := publisher.PublishPage(photo.ID, pageHTML)
 	if err != nil {
 		return "", "", err
 	}

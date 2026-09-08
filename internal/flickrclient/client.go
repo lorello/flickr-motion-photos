@@ -273,6 +273,20 @@ func (c *Client) getPhotoInfo(photoID string) (map[string]interface{}, error) {
 	return photo, nil
 }
 
+// GetPhotoVisibility reports whether photoID is currently public. Used to
+// defer publishing a viewer page/description link for a motion photo that
+// is still private — the page would otherwise be reachable without auth
+// on the public R2 bucket even though the source photo isn't public yet.
+func (c *Client) GetPhotoVisibility(photoID string) (bool, error) {
+	info, err := c.getPhotoInfo(photoID)
+	if err != nil {
+		return false, err
+	}
+	visibility, _ := info["visibility"].(map[string]interface{})
+	isPublic, _ := visibility["ispublic"].(float64)
+	return isPublic == 1, nil
+}
+
 // PhotoDetails carries the extra display metadata the viewer page uses,
 // all sourced from a single getInfo call (no extra API cost per photo).
 type PhotoDetails struct {
@@ -500,18 +514,17 @@ func (c *Client) FindUserIDByUsername(username string) (string, error) {
 	return nsid, nil
 }
 
-// GetPhotosPage restituisce le foto pubbliche dell'utente. privacy_filter=1
-// e' rilevante solo quando autenticati come owner (altrimenti una chiamata
-// anonima vede gia' solo le foto pubbliche per definizione).
+// GetPhotosPage restituisce le foto dell'utente. Quando autenticati come
+// owner questo include anche le private (una chiamata anonima vede solo le
+// pubbliche per definizione) — lo scanner le rileva ed estrae comunque il
+// video, ma rimanda la pubblicazione della pagina finché non diventano
+// pubbliche (vedi ProcessPhoto/GetPhotoVisibility).
 func (c *Client) GetPhotosPage(userID string, page, perPage int) ([]Photo, error) {
 	params := map[string]string{
 		"user_id":  userID,
 		"extras":   "tags",
 		"page":     strconv.Itoa(page),
 		"per_page": strconv.Itoa(perPage),
-	}
-	if c.Authenticated() {
-		params["privacy_filter"] = "1"
 	}
 	result, err := c.Call("flickr.people.getPhotos", params)
 	if err != nil {
