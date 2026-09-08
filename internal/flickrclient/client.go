@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"motionphotos/internal/flickroauth"
@@ -72,31 +73,70 @@ var httpGetFunc = http.Get
 // Iniettabile nei test.
 var downloadOriginalFunc = curlDownload
 
-const (
-	// downloadThrottle: pausa proattiva prima di ogni download, per non
-	// bombardare il CDN durante una scansione di migliaia di foto. 300ms
-	// non è bastato: uno scan reale ci è rimasto dentro (429 costante,
-	// auto-alimentato dal nostro stesso traffico sostenuto — una singola
-	// richiesta isolata nel frattempo tornava 200 pulita). 1.5s è il primo
-	// valore che ha smesso di ritriggerare il limite in sessione.
-	downloadThrottle = 1500 * time.Millisecond
-	// downloadMaxRetries: tentativi aggiuntivi su HTTP 429, con backoff
-	// esponenziale (1s, 2s, 4s, 8s).
-	downloadMaxRetries = 4
-)
+// downloadThrottle: pausa proattiva prima di ogni download, per non
+// bombardare il CDN durante una scansione di migliaia di foto. Verificato
+// in sessione che non basta da solo (vedi cdnCooldown sotto): fa comunque
+// da ritmo base tra i download quando il CDN non è in cooldown.
+const downloadThrottle = 1500 * time.Millisecond
 
 // sleepFunc è iniettabile nei test per non rallentarli con gli sleep veri.
 var sleepFunc = time.Sleep
 
-func curlDownload(rawURL string) (body []byte, statusCode int, err error) {
-	for attempt := 0; ; attempt++ {
-		sleepFunc(downloadThrottle)
-		body, statusCode, err = curlDownloadOnce(rawURL)
-		if err != nil || statusCode != http.StatusTooManyRequests || attempt >= downloadMaxRetries {
-			return body, statusCode, err
-		}
-		sleepFunc(time.Duration(1<<uint(attempt)) * time.Second)
+// cdnCooldown implementa un circuit breaker globale (per processo, non per
+// singola foto) sui 429 dal CDN. Verificato in sessione: un retry-con-backoff
+// per-singola-foto (1s/2s/4s/8s) non risolve — 4 foto diverse, spaziate
+// manualmente fino a 8s, hanno dato 429 su *tutti* i tentativi, segno che il
+// nostro stesso traffico sostenuto durante uno scan di migliaia di foto ha
+// fatto scattare un blocco più lungo di una singola foto, e continuare a
+// ritentare aggressivamente durante quel blocco probabilmente lo rinnova
+// invece di farlo scadere. Il fix è quindi un cooldown condiviso tra TUTTE
+// le foto dello scan: un 429 blocca ogni download successivo fino a
+// blockedUntil (backoff esponenziale, azzerato al primo successo), invece
+// che ogni foto ritentando per conto suo.
+type cdnCooldown struct {
+	mu           sync.Mutex
+	blockedUntil time.Time
+	nextBackoff  time.Duration
+}
+
+var downloadCooldown = &cdnCooldown{nextBackoff: time.Minute}
+
+func (c *cdnCooldown) waitIfBlocked() {
+	c.mu.Lock()
+	until := c.blockedUntil
+	c.mu.Unlock()
+	if wait := time.Until(until); wait > 0 {
+		sleepFunc(wait)
 	}
+}
+
+func (c *cdnCooldown) recordRateLimited() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.blockedUntil = time.Now().Add(c.nextBackoff)
+	if c.nextBackoff < 30*time.Minute {
+		c.nextBackoff *= 2
+	}
+}
+
+func (c *cdnCooldown) recordSuccess() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.nextBackoff = time.Minute
+}
+
+func curlDownload(rawURL string) (body []byte, statusCode int, err error) {
+	downloadCooldown.waitIfBlocked()
+	sleepFunc(downloadThrottle)
+	body, statusCode, err = curlDownloadOnce(rawURL)
+	if err == nil {
+		if statusCode == http.StatusTooManyRequests {
+			downloadCooldown.recordRateLimited()
+		} else {
+			downloadCooldown.recordSuccess()
+		}
+	}
+	return body, statusCode, err
 }
 
 func curlDownloadOnce(rawURL string) (body []byte, statusCode int, err error) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func makeClient() *Client {
@@ -181,6 +182,55 @@ func TestGetPhotoOriginalBytesFailsOnNonOKStatus(t *testing.T) {
 	_, err := client.GetPhotoOriginalBytes("999")
 	if err == nil {
 		t.Fatal("expected error on non-200 download status")
+	}
+}
+
+func TestCdnCooldownWaitsUntilBlockedUntilElapses(t *testing.T) {
+	c := &cdnCooldown{nextBackoff: time.Minute}
+	c.recordRateLimited() // sets blockedUntil ~1 minute out
+
+	var slept time.Duration
+	orig := sleepFunc
+	sleepFunc = func(d time.Duration) { slept = d }
+	t.Cleanup(func() { sleepFunc = orig })
+
+	c.waitIfBlocked()
+	if slept <= 0 || slept > time.Minute {
+		t.Fatalf("expected a sleep close to 1 minute, got %v", slept)
+	}
+}
+
+func TestCdnCooldownDoesNotWaitWhenNotBlocked(t *testing.T) {
+	c := &cdnCooldown{nextBackoff: time.Minute}
+
+	slept := false
+	orig := sleepFunc
+	sleepFunc = func(time.Duration) { slept = true }
+	t.Cleanup(func() { sleepFunc = orig })
+
+	c.waitIfBlocked()
+	if slept {
+		t.Fatal("expected no sleep when never rate-limited")
+	}
+}
+
+func TestCdnCooldownBackoffEscalatesAndResetsOnSuccess(t *testing.T) {
+	c := &cdnCooldown{nextBackoff: time.Minute}
+
+	c.recordRateLimited()
+	firstBackoff := c.nextBackoff
+	if firstBackoff != 2*time.Minute {
+		t.Fatalf("expected backoff to double to 2m after first rate limit, got %v", firstBackoff)
+	}
+
+	c.recordRateLimited()
+	if c.nextBackoff != 4*time.Minute {
+		t.Fatalf("expected backoff to double to 4m after second rate limit, got %v", c.nextBackoff)
+	}
+
+	c.recordSuccess()
+	if c.nextBackoff != time.Minute {
+		t.Fatalf("expected backoff to reset to 1m after a success, got %v", c.nextBackoff)
 	}
 }
 
