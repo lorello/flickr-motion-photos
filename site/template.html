@@ -196,13 +196,13 @@
 <body>
   <div class="brandbar">Flickr Motion Photo Viewer</div>
   <header>
+    <a class="back" href="{{.PhotoPageURL}}">&larr; View on Flickr</a>
     {{if .OwnerName}}
     <div class="owner">
       <img src="{{.OwnerAvatarURL}}" alt="">
       <span>{{.OwnerName}}</span>
     </div>
     {{else}}<span></span>{{end}}
-    <a class="back" href="{{.PhotoPageURL}}">View on Flickr &rarr;</a>
   </header>
   <main>
     <div class="stage">
