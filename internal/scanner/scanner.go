@@ -30,6 +30,7 @@ type Reader interface {
 	GetPhotoOriginalBytes(photoID string) ([]byte, error)
 	GetPhotoDisplayURL(photoID string) (string, error)
 	GetPhotoDescription(photoID string) (string, error)
+	GetPhotoDetails(photoID string) (flickrclient.PhotoDetails, error)
 }
 
 // Writer scrive metadati su Flickr (setMeta/addTags). L'implementazione
@@ -107,12 +108,21 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		return "", err
 	}
 
+	details, err := reader.GetPhotoDetails(photo.ID)
+	if err != nil {
+		return "", err
+	}
+
 	html, err := sitegen.RenderPhotoPage(template, sitegen.PageData{
-		PhotoID:      photo.ID,
-		Title:        photo.Title,
-		ImageURL:     imageURL,
-		VideoURL:     videoURL,
-		PhotoPageURL: fmt.Sprintf("https://www.flickr.com/photos/%s/%s/", username, photo.ID),
+		PhotoID:        photo.ID,
+		Title:          photo.Title,
+		ImageURL:       imageURL,
+		VideoURL:       videoURL,
+		PhotoPageURL:   fmt.Sprintf("https://www.flickr.com/photos/%s/%s/", username, photo.ID),
+		OwnerName:      details.OwnerName,
+		OwnerAvatarURL: details.OwnerAvatarURL,
+		DateTaken:      details.DateTaken,
+		Tags:           details.Tags,
 	})
 	if err != nil {
 		return "", err

@@ -30,6 +30,9 @@ func (f *fakeReader) GetPhotoDisplayURL(photoID string) (string, error) {
 	return f.displayURL, nil
 }
 func (f *fakeReader) GetPhotoDescription(photoID string) (string, error) { return f.description, nil }
+func (f *fakeReader) GetPhotoDetails(photoID string) (flickrclient.PhotoDetails, error) {
+	return flickrclient.PhotoDetails{}, nil
+}
 
 type fakeWriter struct {
 	setDescriptionCalls []string

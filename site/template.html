@@ -24,14 +24,39 @@
   }
   header {
     width: 100%;
+    max-width: 1200px;
     padding: 16px 24px;
     box-sizing: border-box;
-    text-align: left;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
   }
-  header a {
-    color: #0063dc;
+  .owner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .owner img {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: block;
+    flex: none;
+  }
+  .owner span {
+    color: #ccc;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  header a.back {
+    color: #4a9eff;
     text-decoration: none;
     font-weight: 600;
+    white-space: nowrap;
   }
   main {
     display: flex;
@@ -39,7 +64,7 @@
     align-items: center;
     justify-content: center;
     width: 100%;
-    padding: 0 16px 32px;
+    padding: 0 16px 24px;
     box-sizing: border-box;
   }
   .stage {
@@ -48,7 +73,7 @@
   }
   .stage img, .stage video {
     max-width: 100%;
-    max-height: 82vh;
+    max-height: 76vh;
     display: block;
     border-radius: 4px;
   }
@@ -61,23 +86,83 @@
     object-fit: contain;
     border-radius: 4px;
   }
-  h1 {
-    font-size: 1rem;
-    font-weight: 400;
-    color: #bbb;
-    margin: 16px 0 0;
+  .details {
+    width: 100%;
+    max-width: 700px;
+    padding: 0 24px 40px;
+    box-sizing: border-box;
     text-align: center;
+  }
+  h1 {
+    font-size: 1.1rem;
+    font-weight: 400;
+    color: #eee;
+    margin: 0 0 10px;
+  }
+  .meta {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .badge {
+    display: inline-block;
+    background: #0063dc;
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    padding: 3px 10px;
+    border-radius: 999px;
+  }
+  time {
+    color: #999;
+    font-size: 0.85rem;
+  }
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+  }
+  .tag {
+    background: #262626;
+    color: #bbb;
+    font-size: 0.8rem;
+    padding: 4px 10px;
+    border-radius: 999px;
   }
 </style>
 </head>
 <body>
-  <header><a href="{{.PhotoPageURL}}">&larr; View on Flickr</a></header>
+  <header>
+    {{if .OwnerName}}
+    <div class="owner">
+      <img src="{{.OwnerAvatarURL}}" alt="">
+      <span>{{.OwnerName}}</span>
+    </div>
+    {{else}}<span></span>{{end}}
+    <a class="back" href="{{.PhotoPageURL}}">View on Flickr &rarr;</a>
+  </header>
   <main>
     <div class="stage">
       <img src="{{.ImageURL}}" alt="{{.Title}}">
       <video src="{{.VideoURL}}" autoplay muted loop playsinline></video>
     </div>
   </main>
-  <h1>{{.Title}}</h1>
+  <div class="details">
+    <h1>{{.Title}}</h1>
+    <div class="meta">
+      <span class="badge">Motion Photo</span>
+      {{if .DateTaken}}<time>{{.DateTaken}}</time>{{end}}
+    </div>
+    {{if .Tags}}
+    <div class="tags">
+      {{range .Tags}}<span class="tag">{{.}}</span>{{end}}
+    </div>
+    {{end}}
+  </div>
 </body>
 </html>

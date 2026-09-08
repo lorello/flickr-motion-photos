@@ -167,6 +167,53 @@ func (c *Client) getPhotoInfo(photoID string) (map[string]interface{}, error) {
 	return photo, nil
 }
 
+// PhotoDetails carries the extra display metadata the viewer page uses,
+// all sourced from a single getInfo call (no extra API cost per photo).
+type PhotoDetails struct {
+	OwnerName      string
+	OwnerAvatarURL string
+	DateTaken      string
+	Tags           []string
+}
+
+// GetPhotoDetails returns owner/avatar/date/tags for the viewer page.
+// Internal status tags (flickrmp:*) are filtered out — they're not
+// meant for display.
+func (c *Client) GetPhotoDetails(photoID string) (PhotoDetails, error) {
+	info, err := c.getPhotoInfo(photoID)
+	if err != nil {
+		return PhotoDetails{}, err
+	}
+
+	owner, _ := info["owner"].(map[string]interface{})
+	username, _ := owner["username"].(string)
+	nsid, _ := owner["nsid"].(string)
+	iconServer, _ := owner["iconserver"].(string)
+	iconFarm, _ := owner["iconfarm"].(float64)
+
+	avatarURL := "https://www.flickr.com/images/buddyicon.gif"
+	if iconServer != "" && iconServer != "0" {
+		avatarURL = fmt.Sprintf("https://farm%d.staticflickr.com/%s/buddyicons/%s.jpg", int(iconFarm), iconServer, nsid)
+	}
+
+	dates, _ := info["dates"].(map[string]interface{})
+	dateTaken, _ := dates["taken"].(string)
+
+	tagsObj, _ := info["tags"].(map[string]interface{})
+	rawTagList, _ := tagsObj["tag"].([]interface{})
+	tags := make([]string, 0, len(rawTagList))
+	for _, item := range rawTagList {
+		t, _ := item.(map[string]interface{})
+		content, _ := t["_content"].(string)
+		if content == "" || strings.HasPrefix(content, "flickrmp:") {
+			continue // internal bookkeeping namespace, not for display
+		}
+		tags = append(tags, content)
+	}
+
+	return PhotoDetails{OwnerName: username, OwnerAvatarURL: avatarURL, DateTaken: dateTaken, Tags: tags}, nil
+}
+
 // FindUserIDByUsername risolve l'NSID di un utente da username pubblico
 // (chiamata anonima, nessun auth richiesto).
 func (c *Client) FindUserIDByUsername(username string) (string, error) {

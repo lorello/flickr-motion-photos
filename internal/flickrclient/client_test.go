@@ -219,6 +219,66 @@ func TestGetPhotoDisplayURLBuildsLargeSizeURLWithoutOAuth(t *testing.T) {
 	}
 }
 
+func TestGetPhotoDetailsExtractsOwnerAvatarDateAndFiltersInternalTags(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat": "ok",
+			"photo": map[string]interface{}{
+				"owner": map[string]interface{}{
+					"nsid": "65791659@N00", "username": "lorello",
+					"iconserver": "5348", "iconfarm": float64(6),
+				},
+				"dates": map[string]interface{}{"taken": "2026-07-11 11:15:21"},
+				"tags": map[string]interface{}{
+					"tag": []interface{}{
+						map[string]interface{}{"_content": "vacation"},
+						map[string]interface{}{"_content": "flickrmp:status=published"},
+					},
+				},
+			},
+		}), nil
+	})
+	client := makeClient()
+	details, err := client.GetPhotoDetails("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if details.OwnerName != "lorello" {
+		t.Fatalf("unexpected owner name: %s", details.OwnerName)
+	}
+	wantAvatar := "https://farm6.staticflickr.com/5348/buddyicons/65791659@N00.jpg"
+	if details.OwnerAvatarURL != wantAvatar {
+		t.Fatalf("got %s, want %s", details.OwnerAvatarURL, wantAvatar)
+	}
+	if details.DateTaken != "2026-07-11 11:15:21" {
+		t.Fatalf("unexpected date taken: %s", details.DateTaken)
+	}
+	if len(details.Tags) != 1 || details.Tags[0] != "vacation" {
+		t.Fatalf("expected only 'vacation' tag (internal flickrmp: tag filtered out), got %v", details.Tags)
+	}
+}
+
+func TestGetPhotoDetailsUsesDefaultAvatarWhenNoIconServer(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat": "ok",
+			"photo": map[string]interface{}{
+				"owner": map[string]interface{}{"nsid": "999@N00", "username": "someone", "iconserver": "0"},
+				"dates": map[string]interface{}{"taken": ""},
+				"tags":  map[string]interface{}{"tag": []interface{}{}},
+			},
+		}), nil
+	})
+	client := makeClient()
+	details, err := client.GetPhotoDetails("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if details.OwnerAvatarURL != "https://www.flickr.com/images/buddyicon.gif" {
+		t.Fatalf("unexpected default avatar: %s", details.OwnerAvatarURL)
+	}
+}
+
 func TestAddTagCallsAddTags(t *testing.T) {
 	var capturedParams map[string]string
 	withUnsignedGet(t, func(_ string, params map[string]string) (string, error) {

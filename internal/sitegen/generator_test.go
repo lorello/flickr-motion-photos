@@ -10,6 +10,9 @@ const testTemplate = `<!doctype html>
 <img src="{{.ImageURL}}">
 <video src="{{.VideoURL}}" autoplay muted loop playsinline></video>
 <a href="{{.PhotoPageURL}}">View on Flickr</a>
+{{if .OwnerName}}<div class="owner"><img src="{{.OwnerAvatarURL}}"><span>{{.OwnerName}}</span></div>{{end}}
+{{if .DateTaken}}<time>{{.DateTaken}}</time>{{end}}
+{{if .Tags}}<div class="tags">{{range .Tags}}<span class="tag">{{.}}</span>{{end}}</div>{{end}}
 `
 
 func TestRenderPhotoPageSubstitutesAllPlaceholders(t *testing.T) {
@@ -34,6 +37,44 @@ func TestRenderPhotoPageSubstitutesAllPlaceholders(t *testing.T) {
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("expected output to contain %q", want)
+		}
+	}
+}
+
+func TestRenderPhotoPageIncludesOwnerDateAndTagsWhenPresent(t *testing.T) {
+	html, err := RenderPhotoPage(testTemplate, PageData{
+		Title:          "t",
+		ImageURL:       "https://live.staticflickr.com/x/123_secret_b.jpg",
+		VideoURL:       "https://videos.example.com/123.mp4",
+		PhotoPageURL:   "https://www.flickr.com/photos/lorello/123/",
+		OwnerName:      "lorello",
+		OwnerAvatarURL: "https://farm6.staticflickr.com/5348/buddyicons/65791659@N00.jpg",
+		DateTaken:      "2026-07-11 11:15:21",
+		Tags:           []string{"vacation", "lake"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{"lorello", "buddyicons", "2026-07-11 11:15:21", "vacation", "lake"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected output to contain %q, got: %s", want, html)
+		}
+	}
+}
+
+func TestRenderPhotoPageOmitsOwnerDateTagsWhenAbsent(t *testing.T) {
+	html, err := RenderPhotoPage(testTemplate, PageData{
+		Title:        "t",
+		ImageURL:     "https://live.staticflickr.com/x/123_secret_b.jpg",
+		VideoURL:     "https://videos.example.com/123.mp4",
+		PhotoPageURL: "https://www.flickr.com/photos/lorello/123/",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, absent := range []string{"owner", "<time>", "tags"} {
+		if strings.Contains(html, absent) {
+			t.Fatalf("expected no %q in output when field is empty, got: %s", absent, html)
 		}
 	}
 }
@@ -75,5 +116,19 @@ func TestRenderPhotoPageRejectsNonHTTPSVideoURL(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for non-https VideoURL")
+	}
+}
+
+func TestRenderPhotoPageRejectsNonHTTPSOwnerAvatarURL(t *testing.T) {
+	_, err := RenderPhotoPage(testTemplate, PageData{
+		Title:          "t",
+		ImageURL:       "https://live.staticflickr.com/x/123_secret_b.jpg",
+		VideoURL:       "https://videos.example.com/123.mp4",
+		PhotoPageURL:   "https://www.flickr.com/photos/lorello/123/",
+		OwnerName:      "lorello",
+		OwnerAvatarURL: "javascript:alert(1)",
+	})
+	if err == nil {
+		t.Fatal("expected error for non-https OwnerAvatarURL")
 	}
 }

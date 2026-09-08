@@ -11,11 +11,15 @@ import (
 )
 
 type PageData struct {
-	PhotoID      string
-	Title        string
-	ImageURL     string
-	VideoURL     string
-	PhotoPageURL string
+	PhotoID        string
+	Title          string
+	ImageURL       string
+	VideoURL       string
+	PhotoPageURL   string
+	OwnerName      string
+	OwnerAvatarURL string
+	DateTaken      string
+	Tags           []string
 }
 
 // RenderPhotoPage renders template against data using html/template, which
@@ -31,6 +35,9 @@ func RenderPhotoPage(templateSrc string, data PageData) (string, error) {
 	}
 	if !strings.HasPrefix(data.VideoURL, "https://") {
 		return "", fmt.Errorf("sitegen: VideoURL must be https://, got %q", data.VideoURL)
+	}
+	if data.OwnerAvatarURL != "" && !strings.HasPrefix(data.OwnerAvatarURL, "https://") {
+		return "", fmt.Errorf("sitegen: OwnerAvatarURL must be https://, got %q", data.OwnerAvatarURL)
 	}
 
 	t, err := template.New("page").Parse(templateSrc)
