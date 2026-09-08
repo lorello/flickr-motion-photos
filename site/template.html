@@ -14,7 +14,7 @@
   :root { color-scheme: dark; }
   body {
     margin: 0;
-    background: #212124;
+    background: #000;
     color: #fff;
     font-family: "Proxima Nova", "helvetica neue", helvetica, arial, sans-serif;
     display: flex;
@@ -75,7 +75,7 @@
     align-items: center;
     justify-content: center;
     width: 100%;
-    padding: 0 16px 24px;
+    padding: 0 16px;
     box-sizing: border-box;
   }
   .stage {
@@ -86,7 +86,6 @@
     max-width: 100%;
     max-height: 76vh;
     display: block;
-    border-radius: 4px;
   }
   .stage video {
     position: absolute;
@@ -95,47 +94,50 @@
     width: 100%;
     height: 100%;
     object-fit: contain;
-    border-radius: 4px;
   }
-  .controls {
-    position: absolute;
-    right: 12px;
-    bottom: 12px;
+  .iconrow {
+    width: 100%;
+    max-width: 1200px;
+    padding: 10px 24px;
+    box-sizing: border-box;
     display: flex;
-    gap: 6px;
+    justify-content: flex-end;
+    gap: 20px;
   }
-  .controls button {
-    width: 36px;
-    height: 36px;
+  .iconrow button {
+    background: none;
     border: none;
-    border-radius: 50%;
-    background: rgba(0, 0, 0, 0.55);
     color: #fff;
-    font-size: 1rem;
+    font-size: 1.1rem;
     line-height: 1;
     cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    backdrop-filter: blur(2px);
+    padding: 6px;
+    opacity: 0.8;
   }
-  .controls button:hover {
-    background: rgba(0, 0, 0, 0.75);
+  .iconrow button:hover {
+    opacity: 1;
   }
-  .controls button.active {
-    color: #4a9eff;
+  .iconrow button.active {
+    color: #128fdc;
+    opacity: 1;
   }
-  .details {
+  .content {
+    width: 100%;
+    background: #f3f5f6;
+    color: #222;
+  }
+  .content-inner {
     width: 100%;
     max-width: 700px;
-    padding: 0 24px 40px;
+    margin: 0 auto;
+    padding: 24px 24px 8px;
     box-sizing: border-box;
     text-align: center;
   }
   h1 {
     font-size: 1.1rem;
-    font-weight: 400;
-    color: #eee;
+    font-weight: 700;
+    color: #222;
     margin: 0 0 10px;
   }
   .meta {
@@ -157,7 +159,7 @@
     border-radius: 999px;
   }
   time {
-    color: #999;
+    color: #777;
     font-size: 0.85rem;
   }
   .tags {
@@ -165,46 +167,26 @@
     flex-wrap: wrap;
     justify-content: center;
     gap: 8px;
+    margin-bottom: 8px;
   }
   .tag {
-    background: #262626;
-    color: #bbb;
+    background: #e6e9eb;
+    color: #555;
     font-size: 0.8rem;
     padding: 4px 10px;
     border-radius: 999px;
   }
-  footer {
-    padding: 0 24px 24px;
-    text-align: center;
-  }
-  footer a {
-    color: #666;
-    font-size: 0.8rem;
-    text-decoration: none;
-  }
-  footer a:hover {
-    color: #999;
-    text-decoration: underline;
-  }
-  .disclaimer {
-    color: #555;
-    font-size: 0.72rem;
-    margin: 0 0 6px;
-  }
   .infopanel {
     width: 100%;
-    background: #f3f5f6;
-    color: #222;
-    padding: 20px 24px;
+    max-width: 420px;
+    margin: 8px auto 0;
+    padding: 12px 0;
     box-sizing: border-box;
-    display: flex;
-    justify-content: center;
   }
   .infopanel table {
     border-collapse: collapse;
     font-size: 0.85rem;
     width: 100%;
-    max-width: 420px;
   }
   .infopanel th, .infopanel td {
     text-align: left;
@@ -221,6 +203,24 @@
   }
   .infopanel tr:last-child th, .infopanel tr:last-child td {
     border-bottom: none;
+  }
+  footer {
+    padding: 8px 24px 24px;
+    text-align: center;
+  }
+  footer a {
+    color: #888;
+    font-size: 0.8rem;
+    text-decoration: none;
+  }
+  footer a:hover {
+    color: #555;
+    text-decoration: underline;
+  }
+  .disclaimer {
+    color: #999;
+    font-size: 0.72rem;
+    margin: 0 0 6px;
   }
 </style>
 </head>
@@ -239,40 +239,42 @@
     <div class="stage">
       <img id="photo" src="{{.ImageURL}}" alt="{{.Title}}">
       <video id="video" src="{{.VideoURL}}" autoplay muted loop playsinline></video>
-      <div class="controls">
-        <button id="playPauseBtn" type="button" aria-label="Pause">&#10074;&#10074;</button>
-        <button id="loopBtn" type="button" class="active" aria-label="Turn off loop">&#8635;</button>
-      </div>
     </div>
   </main>
-  <div class="details">
-    <h1>{{.Title}}</h1>
-    <div class="meta">
-      <span class="badge">Motion Photo</span>
-      {{if .DateTaken}}<time>{{.DateTaken}}</time>{{end}}
-    </div>
-    {{if .Tags}}
-    <div class="tags">
-      {{range .Tags}}<span class="tag">{{.}}</span>{{end}}
-    </div>
-    {{end}}
+  <div class="iconrow">
+    <button id="playPauseBtn" type="button" aria-label="Pause">&#10074;&#10074;</button>
+    <button id="loopBtn" type="button" class="active" aria-label="Turn off loop">&#8635;</button>
   </div>
-  {{if or .Views .Camera}}
-  <div class="infopanel">
-    <table>
-      {{if .Views}}<tr><th>Views</th><td>{{.Views}}</td></tr>{{end}}
-      {{if .Camera}}<tr><th>Camera</th><td>{{.Camera}}</td></tr>{{end}}
-      {{if .ExposureTime}}<tr><th>Exposure</th><td>{{.ExposureTime}}</td></tr>{{end}}
-      {{if .FNumber}}<tr><th>Aperture</th><td>{{.FNumber}}</td></tr>{{end}}
-      {{if .ISO}}<tr><th>ISO Speed</th><td>{{.ISO}}</td></tr>{{end}}
-      {{if .FocalLength}}<tr><th>Focal Length</th><td>{{.FocalLength}}</td></tr>{{end}}
-    </table>
+  <div class="content">
+    <div class="content-inner">
+      <h1>{{.Title}}</h1>
+      <div class="meta">
+        <span class="badge">Motion Photo</span>
+        {{if .DateTaken}}<time>{{.DateTaken}}</time>{{end}}
+      </div>
+      {{if .Tags}}
+      <div class="tags">
+        {{range .Tags}}<span class="tag">{{.}}</span>{{end}}
+      </div>
+      {{end}}
+      {{if or .Views .Camera}}
+      <div class="infopanel">
+        <table>
+          {{if .Views}}<tr><th>Views</th><td>{{.Views}}</td></tr>{{end}}
+          {{if .Camera}}<tr><th>Camera</th><td>{{.Camera}}</td></tr>{{end}}
+          {{if .ExposureTime}}<tr><th>Exposure</th><td>{{.ExposureTime}}</td></tr>{{end}}
+          {{if .FNumber}}<tr><th>Aperture</th><td>{{.FNumber}}</td></tr>{{end}}
+          {{if .ISO}}<tr><th>ISO Speed</th><td>{{.ISO}}</td></tr>{{end}}
+          {{if .FocalLength}}<tr><th>Focal Length</th><td>{{.FocalLength}}</td></tr>{{end}}
+        </table>
+      </div>
+      {{end}}
+    </div>
+    <footer>
+      <p class="disclaimer">Built using the Flickr API. Not affiliated with, endorsed by, or a product of Flickr / SmugMug.</p>
+      <a href="https://www.flickr.com/groups/14903850@N24/discuss/">Questions or bugs?</a>
+    </footer>
   </div>
-  {{end}}
-  <footer>
-    <p class="disclaimer">Built using the Flickr API. Not affiliated with, endorsed by, or a product of Flickr / SmugMug.</p>
-    <a href="https://www.flickr.com/groups/14903850@N24/discuss/">Questions or bugs?</a>
-  </footer>
   <script>
   (function () {
     var video = document.getElementById('video');
