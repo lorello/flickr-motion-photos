@@ -107,13 +107,16 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		return "", err
 	}
 
-	html := sitegen.RenderPhotoPage(template, sitegen.PageData{
+	html, err := sitegen.RenderPhotoPage(template, sitegen.PageData{
 		PhotoID:      photo.ID,
 		Title:        photo.Title,
 		ImageURL:     imageURL,
 		VideoURL:     videoURL,
 		PhotoPageURL: fmt.Sprintf("https://www.flickr.com/photos/%s/%s/", username, photo.ID),
 	})
+	if err != nil {
+		return "", err
+	}
 
 	viewerURL, err := publisher.PublishPage(photo.ID, html)
 	if err != nil {

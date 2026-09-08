@@ -3,7 +3,12 @@
 // caller's job (see internal/r2upload).
 package sitegen
 
-import "strings"
+import (
+	"bytes"
+	"fmt"
+	"html/template"
+	"strings"
+)
 
 type PageData struct {
 	PhotoID      string
@@ -13,12 +18,28 @@ type PageData struct {
 	PhotoPageURL string
 }
 
-func RenderPhotoPage(template string, data PageData) string {
-	replacer := strings.NewReplacer(
-		"{{TITLE}}", data.Title,
-		"{{IMAGE_URL}}", data.ImageURL,
-		"{{VIDEO_URL}}", data.VideoURL,
-		"{{PHOTO_PAGE_URL}}", data.PhotoPageURL,
-	)
-	return replacer.Replace(template)
+// RenderPhotoPage renders template against data using html/template, which
+// context-aware escapes every field (text nodes, attribute values, URL
+// attributes) — Flickr photo titles are free text the account owner (or,
+// on a public photo, anyone who can see it) controls, so raw string
+// substitution here would be a stored-XSS hole on a publicly served page.
+// ImageURL/VideoURL are additionally required to be plain https:// URLs,
+// on top of html/template's own URL-context sanitization.
+func RenderPhotoPage(templateSrc string, data PageData) (string, error) {
+	if !strings.HasPrefix(data.ImageURL, "https://") {
+		return "", fmt.Errorf("sitegen: ImageURL must be https://, got %q", data.ImageURL)
+	}
+	if !strings.HasPrefix(data.VideoURL, "https://") {
+		return "", fmt.Errorf("sitegen: VideoURL must be https://, got %q", data.VideoURL)
+	}
+
+	t, err := template.New("page").Parse(templateSrc)
+	if err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, data); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }

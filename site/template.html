@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{TITLE}}</title>
+<title>{{.Title}}</title>
 <style>
   :root { color-scheme: dark; }
   body {
@@ -65,13 +65,13 @@
 </style>
 </head>
 <body>
-  <header><a href="{{PHOTO_PAGE_URL}}">&larr; View on Flickr</a></header>
+  <header><a href="{{.PhotoPageURL}}">&larr; View on Flickr</a></header>
   <main>
     <div class="stage">
-      <img src="{{IMAGE_URL}}" alt="{{TITLE}}">
-      <video src="{{VIDEO_URL}}" autoplay muted loop playsinline></video>
+      <img src="{{.ImageURL}}" alt="{{.Title}}">
+      <video src="{{.VideoURL}}" autoplay muted loop playsinline></video>
     </div>
   </main>
-  <h1>{{TITLE}}</h1>
+  <h1>{{.Title}}</h1>
 </body>
 </html>

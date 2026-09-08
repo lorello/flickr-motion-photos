@@ -10,7 +10,7 @@ import (
 	"motionphotos/internal/statestore"
 )
 
-const testTemplate = `<!doctype html><title>{{TITLE}}</title><img src="{{IMAGE_URL}}"><video src="{{VIDEO_URL}}"></video><a href="{{PHOTO_PAGE_URL}}"></a>`
+const testTemplate = `<!doctype html><title>{{.Title}}</title><img src="{{.ImageURL}}"><video src="{{.VideoURL}}"></video><a href="{{.PhotoPageURL}}"></a>`
 const testUsername = "testuser"
 
 type fakeReader struct {
