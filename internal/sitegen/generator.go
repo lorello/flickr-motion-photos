@@ -11,21 +11,23 @@ import (
 )
 
 type PageData struct {
-	PhotoID        string
-	Title          string
-	ImageURL       string
-	VideoURL       string
-	PhotoPageURL   string
-	OwnerName      string
-	OwnerAvatarURL string
-	DateTaken      string
-	Tags           []string
-	Views          string
-	Camera         string
-	ExposureTime   string
-	FNumber        string
-	ISO            string
-	FocalLength    string
+	PhotoID          string
+	Title            string
+	ImageURL         string
+	VideoURL         string
+	PhotoPageURL     string
+	OwnerName        string
+	OwnerAvatarURL   string
+	OwnerDescription string // the photo owner's own caption, if any — never our own injected sentence (see scanner.StripOwnSentence)
+	DateTaken        string
+	Tags             []string
+	Views            string
+	Comments         string
+	Camera           string
+	ExposureTime     string
+	FNumber          string
+	ISO              string
+	FocalLength      string
 }
 
 // RenderPhotoPage renders template against data using html/template, which

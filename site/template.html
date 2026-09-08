@@ -38,30 +38,6 @@
     max-width: 1200px;
     padding: 16px 24px;
     box-sizing: border-box;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-  }
-  .owner {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-  }
-  .owner img {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    display: block;
-    flex: none;
-  }
-  .owner span {
-    color: #ccc;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
   header a.back {
     color: #128fdc;
@@ -130,20 +106,47 @@
     width: 100%;
     max-width: 700px;
     margin: 0 auto;
-    padding: 24px 24px 8px;
+    padding: 20px 24px 8px;
     box-sizing: border-box;
-    text-align: center;
+    text-align: left;
+  }
+  .owner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    margin-bottom: 16px;
+  }
+  .owner img {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: block;
+    flex: none;
+  }
+  .owner span {
+    color: #222;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   h1 {
-    font-size: 1.1rem;
+    font-size: 1.15rem;
     font-weight: 700;
     color: #222;
     margin: 0 0 10px;
   }
+  .description {
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: #333;
+    margin: 0 0 14px;
+    white-space: pre-wrap;
+  }
   .meta {
     display: flex;
     align-items: center;
-    justify-content: center;
     gap: 10px;
     flex-wrap: wrap;
     margin-bottom: 14px;
@@ -165,9 +168,8 @@
   .tags {
     display: flex;
     flex-wrap: wrap;
-    justify-content: center;
     gap: 8px;
-    margin-bottom: 8px;
+    margin-bottom: 14px;
   }
   .tag {
     background: #e6e9eb;
@@ -176,11 +178,18 @@
     padding: 4px 10px;
     border-radius: 999px;
   }
+  .comments {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #222;
+    padding: 14px 0;
+    border-top: 1px solid #e0e0e0;
+  }
   .infopanel {
     width: 100%;
     max-width: 420px;
-    margin: 8px auto 0;
-    padding: 12px 0;
+    padding: 12px 0 4px;
     box-sizing: border-box;
   }
   .infopanel table {
@@ -205,8 +214,8 @@
     border-bottom: none;
   }
   footer {
-    padding: 8px 24px 24px;
-    text-align: center;
+    padding: 16px 24px 24px;
+    text-align: left;
   }
   footer a {
     color: #888;
@@ -228,12 +237,6 @@
   <div class="brandbar">Flickr Motion Photo Viewer</div>
   <header>
     <a class="back" href="{{.PhotoPageURL}}">&larr; View on Flickr</a>
-    {{if .OwnerName}}
-    <div class="owner">
-      <img src="{{.OwnerAvatarURL}}" alt="">
-      <span>{{.OwnerName}}</span>
-    </div>
-    {{else}}<span></span>{{end}}
   </header>
   <main>
     <div class="stage">
@@ -247,7 +250,14 @@
   </div>
   <div class="content">
     <div class="content-inner">
+      {{if .OwnerName}}
+      <div class="owner">
+        <img src="{{.OwnerAvatarURL}}" alt="">
+        <span>{{.OwnerName}}</span>
+      </div>
+      {{end}}
       <h1>{{.Title}}</h1>
+      {{if .OwnerDescription}}<p class="description">{{.OwnerDescription}}</p>{{end}}
       <div class="meta">
         <span class="badge">Motion Photo</span>
         {{if .DateTaken}}<time>{{.DateTaken}}</time>{{end}}
@@ -269,6 +279,7 @@
         </table>
       </div>
       {{end}}
+      {{if .Comments}}<span class="comments">Comments ({{.Comments}})</span>{{end}}
     </div>
     <footer>
       <p class="disclaimer">Built using the Flickr API. Not affiliated with, endorsed by, or a product of Flickr / SmugMug.</p>

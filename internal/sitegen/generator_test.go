@@ -11,7 +11,9 @@ const testTemplate = `<!doctype html>
 <video src="{{.VideoURL}}" autoplay muted loop playsinline></video>
 <a href="{{.PhotoPageURL}}">View on Flickr</a>
 {{if .OwnerName}}<div class="owner"><img src="{{.OwnerAvatarURL}}"><span>{{.OwnerName}}</span></div>{{end}}
+{{if .OwnerDescription}}<p class="description">{{.OwnerDescription}}</p>{{end}}
 {{if .DateTaken}}<time>{{.DateTaken}}</time>{{end}}
+{{if .Comments}}<span class="comments">Comments ({{.Comments}})</span>{{end}}
 {{if .Tags}}<div class="tags">{{range .Tags}}<span class="tag">{{.}}</span>{{end}}</div>{{end}}
 {{if or .Views .Camera}}<div class="infopanel">
 {{if .Views}}<span>{{.Views}}</span>{{end}}
@@ -67,6 +69,41 @@ func TestRenderPhotoPageIncludesOwnerDateAndTagsWhenPresent(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Fatalf("expected output to contain %q, got: %s", want, html)
 		}
+	}
+}
+
+func TestRenderPhotoPageIncludesOwnerDescriptionAndCommentsWhenPresent(t *testing.T) {
+	html, err := RenderPhotoPage(testTemplate, PageData{
+		Title:            "t",
+		ImageURL:         "https://live.staticflickr.com/x/123_secret_b.jpg",
+		VideoURL:         "https://videos.example.com/123.mp4",
+		PhotoPageURL:     "https://www.flickr.com/photos/lorello/123/",
+		OwnerDescription: "A day at the lake",
+		Comments:         "3",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{"A day at the lake", "Comments (3)"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected output to contain %q, got: %s", want, html)
+		}
+	}
+}
+
+func TestRenderPhotoPageEscapesOwnerDescription(t *testing.T) {
+	html, err := RenderPhotoPage(testTemplate, PageData{
+		Title:            "t",
+		ImageURL:         "https://live.staticflickr.com/x/123_secret_b.jpg",
+		VideoURL:         "https://videos.example.com/123.mp4",
+		PhotoPageURL:     "https://www.flickr.com/photos/lorello/123/",
+		OwnerDescription: `<script>alert(1)</script>`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(html, "<script>") {
+		t.Fatalf("expected owner description to be escaped, got raw <script> in output: %s", html)
 	}
 }
 

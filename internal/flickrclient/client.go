@@ -175,6 +175,7 @@ type PhotoDetails struct {
 	DateTaken      string
 	Tags           []string
 	Views          string
+	Comments       string
 }
 
 // GetPhotoDetails returns owner/avatar/date/tags for the viewer page.
@@ -214,7 +215,10 @@ func (c *Client) GetPhotoDetails(photoID string) (PhotoDetails, error) {
 
 	views, _ := info["views"].(string)
 
-	return PhotoDetails{OwnerName: username, OwnerAvatarURL: avatarURL, DateTaken: dateTaken, Tags: tags, Views: views}, nil
+	commentsObj, _ := info["comments"].(map[string]interface{})
+	comments, _ := commentsObj["_content"].(string)
+
+	return PhotoDetails{OwnerName: username, OwnerAvatarURL: avatarURL, DateTaken: dateTaken, Tags: tags, Views: views, Comments: comments}, nil
 }
 
 // PhotoExif carries camera/exposure info for the viewer page's "additional

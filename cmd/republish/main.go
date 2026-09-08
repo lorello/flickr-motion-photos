@@ -14,6 +14,7 @@ import (
 
 	"motionphotos/internal/flickrclient"
 	"motionphotos/internal/r2upload"
+	"motionphotos/internal/scanner"
 	"motionphotos/internal/sitegen"
 	"motionphotos/internal/statestore"
 )
@@ -104,22 +105,30 @@ func main() {
 		exif, _ := client.GetPhotoExif(photoID) // supplementary, degrade gracefully
 		videoURL := r2PublicBaseURL + "/" + photoID + ".mp4"
 
+		currentDescription, err := client.GetPhotoDescription(photoID)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "FAIL description", photoID, err)
+			continue
+		}
+
 		html, err := sitegen.RenderPhotoPage(string(templateBytes), sitegen.PageData{
-			PhotoID:        photoID,
-			Title:          title,
-			ImageURL:       imageURL,
-			VideoURL:       videoURL,
-			PhotoPageURL:   fmt.Sprintf("https://www.flickr.com/photos/%s/%s/", *username, photoID),
-			OwnerName:      details.OwnerName,
-			OwnerAvatarURL: details.OwnerAvatarURL,
-			DateTaken:      details.DateTaken,
-			Tags:           details.Tags,
-			Views:          details.Views,
-			Camera:         exif.Camera,
-			ExposureTime:   exif.ExposureTime,
-			FNumber:        exif.FNumber,
-			ISO:            exif.ISO,
-			FocalLength:    exif.FocalLength,
+			PhotoID:          photoID,
+			Title:            title,
+			ImageURL:         imageURL,
+			VideoURL:         videoURL,
+			PhotoPageURL:     fmt.Sprintf("https://www.flickr.com/photos/%s/%s/", *username, photoID),
+			OwnerName:        details.OwnerName,
+			OwnerAvatarURL:   details.OwnerAvatarURL,
+			OwnerDescription: scanner.StripOwnSentence(currentDescription),
+			DateTaken:        details.DateTaken,
+			Tags:             details.Tags,
+			Views:            details.Views,
+			Comments:         details.Comments,
+			Camera:           exif.Camera,
+			ExposureTime:     exif.ExposureTime,
+			FNumber:          exif.FNumber,
+			ISO:              exif.ISO,
+			FocalLength:      exif.FocalLength,
 		})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "FAIL render", photoID, err)

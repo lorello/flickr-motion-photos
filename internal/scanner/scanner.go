@@ -22,6 +22,24 @@ import (
 
 const statusTagPrefix = "flickrmp:status="
 
+// motionPhotoSentencePrefix is the fixed lead-in of the sentence ProcessPhoto
+// appends to a photo's description. StripOwnSentence uses it to recover the
+// owner's original caption (if any) for display on the viewer page — showing
+// our own "watch the video" sentence back on the very page that IS the video
+// would be circular.
+const motionPhotoSentencePrefix = "This is a Motion Photo — watch the video: "
+
+// StripOwnSentence returns desc with our own appended sentence (and the
+// blank line before it) removed, leaving only the photo owner's original
+// caption. Safe to call on a description that never had our sentence.
+func StripOwnSentence(desc string) string {
+	idx := strings.Index(desc, motionPhotoSentencePrefix)
+	if idx < 0 {
+		return desc
+	}
+	return strings.TrimSpace(desc[:idx])
+}
+
 // Reader è il sottoinsieme di lettura di flickrclient.Client richiesto dallo
 // scanner — separato da Writer così le due responsabilità si possono
 // sostituire indipendentemente (es. Reader reale + Writer simulato, come
@@ -120,22 +138,33 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 	// calls), degrade gracefully instead of failing the whole publish.
 	exif, _ := reader.GetPhotoExif(photo.ID)
 
+	// Fetched before rendering: the page shows the owner's *original*
+	// caption (StripOwnSentence removes our own appended sentence, which
+	// would be circular to show on the very page that IS the video), and
+	// the same value is reused below for the idempotent description check.
+	currentDescription, err := reader.GetPhotoDescription(photo.ID)
+	if err != nil {
+		return "", err
+	}
+
 	html, err := sitegen.RenderPhotoPage(template, sitegen.PageData{
-		PhotoID:        photo.ID,
-		Title:          photo.Title,
-		ImageURL:       imageURL,
-		VideoURL:       videoURL,
-		PhotoPageURL:   fmt.Sprintf("https://www.flickr.com/photos/%s/%s/", username, photo.ID),
-		OwnerName:      details.OwnerName,
-		OwnerAvatarURL: details.OwnerAvatarURL,
-		DateTaken:      details.DateTaken,
-		Tags:           details.Tags,
-		Views:          details.Views,
-		Camera:         exif.Camera,
-		ExposureTime:   exif.ExposureTime,
-		FNumber:        exif.FNumber,
-		ISO:            exif.ISO,
-		FocalLength:    exif.FocalLength,
+		PhotoID:          photo.ID,
+		Title:            photo.Title,
+		ImageURL:         imageURL,
+		VideoURL:         videoURL,
+		PhotoPageURL:     fmt.Sprintf("https://www.flickr.com/photos/%s/%s/", username, photo.ID),
+		OwnerName:        details.OwnerName,
+		OwnerAvatarURL:   details.OwnerAvatarURL,
+		OwnerDescription: StripOwnSentence(currentDescription),
+		DateTaken:        details.DateTaken,
+		Tags:             details.Tags,
+		Views:            details.Views,
+		Comments:         details.Comments,
+		Camera:           exif.Camera,
+		ExposureTime:     exif.ExposureTime,
+		FNumber:          exif.FNumber,
+		ISO:              exif.ISO,
+		FocalLength:      exif.FocalLength,
 	})
 	if err != nil {
 		return "", err
@@ -146,10 +175,6 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		return "", err
 	}
 
-	currentDescription, err := reader.GetPhotoDescription(photo.ID)
-	if err != nil {
-		return "", err
-	}
 	if !strings.Contains(currentDescription, viewerURL) {
 		descriptionLinkURL := viewerURL + "?utm_source=flickr&utm_medium=description&utm_campaign=motion_photo&utm_content=" + url.QueryEscape(username)
 		sentence := "This is a Motion Photo — watch the video: " + descriptionLinkURL

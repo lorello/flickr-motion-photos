@@ -228,8 +228,9 @@ func TestGetPhotoDetailsExtractsOwnerAvatarDateAndFiltersInternalTags(t *testing
 					"nsid": "65791659@N00", "username": "lorello",
 					"iconserver": "5348", "iconfarm": float64(6),
 				},
-				"dates": map[string]interface{}{"taken": "2026-07-11 11:15:21"},
-				"views": "1033",
+				"dates":    map[string]interface{}{"taken": "2026-07-11 11:15:21"},
+				"views":    "1033",
+				"comments": map[string]interface{}{"_content": "3"},
 				"tags": map[string]interface{}{
 					"tag": []interface{}{
 						map[string]interface{}{"_content": "vacation"},
@@ -256,6 +257,9 @@ func TestGetPhotoDetailsExtractsOwnerAvatarDateAndFiltersInternalTags(t *testing
 	}
 	if details.Views != "1033" {
 		t.Fatalf("unexpected views: %s", details.Views)
+	}
+	if details.Comments != "3" {
+		t.Fatalf("unexpected comments: %s", details.Comments)
 	}
 	if len(details.Tags) != 1 || details.Tags[0] != "vacation" {
 		t.Fatalf("expected only 'vacation' tag (internal flickrmp: tag filtered out), got %v", details.Tags)
