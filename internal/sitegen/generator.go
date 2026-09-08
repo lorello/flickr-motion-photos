@@ -20,9 +20,16 @@ type PageData struct {
 	OwnerAvatarURL   string
 	OwnerDescription string // the photo owner's own caption, if any — never our own injected sentence (see scanner.StripOwnSentence)
 	DateTaken        string
+	DateUploaded     string
 	Tags             []string
 	Views            string
 	Comments         string
+	Favorites        string
+	LicenseName      string
+	LicenseURL       string
+	MapEmbedURL      string // pre-built OpenStreetMap embed URL, empty if the photo isn't geotagged (see scanner for how it's built)
+	Groups           []string
+	People           []string
 	Camera           string
 	ExposureTime     string
 	FNumber          string
@@ -46,6 +53,9 @@ func RenderPhotoPage(templateSrc string, data PageData) (string, error) {
 	}
 	if data.OwnerAvatarURL != "" && !strings.HasPrefix(data.OwnerAvatarURL, "https://") {
 		return "", fmt.Errorf("sitegen: OwnerAvatarURL must be https://, got %q", data.OwnerAvatarURL)
+	}
+	if data.MapEmbedURL != "" && !strings.HasPrefix(data.MapEmbedURL, "https://") {
+		return "", fmt.Errorf("sitegen: MapEmbedURL must be https://, got %q", data.MapEmbedURL)
 	}
 
 	t, err := template.New("page").Parse(templateSrc)

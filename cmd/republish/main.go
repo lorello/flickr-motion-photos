@@ -102,7 +102,16 @@ func main() {
 			fmt.Fprintln(os.Stderr, "FAIL details", photoID, err)
 			continue
 		}
-		exif, _ := client.GetPhotoExif(photoID) // supplementary, degrade gracefully
+		// Supplementary: each degrades gracefully on its own if it fails.
+		exif, _ := client.GetPhotoExif(photoID)
+		favorites, _ := client.GetPhotoFavoritesCount(photoID)
+		groups, _ := client.GetPhotoGroups(photoID)
+		people, _ := client.GetPhotoPeople(photoID)
+		var mapEmbedURL string
+		if lat, lon, hasGeo, geoErr := client.GetPhotoGeo(photoID); geoErr == nil && hasGeo {
+			mapEmbedURL, _ = scanner.BuildMapEmbedURL(lat, lon)
+		}
+
 		videoURL := r2PublicBaseURL + "/" + photoID + ".mp4"
 
 		currentDescription, err := client.GetPhotoDescription(photoID)
@@ -121,9 +130,16 @@ func main() {
 			OwnerAvatarURL:   details.OwnerAvatarURL,
 			OwnerDescription: scanner.StripOwnSentence(currentDescription),
 			DateTaken:        details.DateTaken,
+			DateUploaded:     details.DateUploaded,
 			Tags:             details.Tags,
 			Views:            details.Views,
 			Comments:         details.Comments,
+			Favorites:        favorites,
+			LicenseName:      details.LicenseName,
+			LicenseURL:       details.LicenseURL,
+			MapEmbedURL:      mapEmbedURL,
+			Groups:           groups,
+			People:           people,
 			Camera:           exif.Camera,
 			ExposureTime:     exif.ExposureTime,
 			FNumber:          exif.FNumber,

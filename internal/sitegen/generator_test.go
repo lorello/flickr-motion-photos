@@ -215,3 +215,16 @@ func TestRenderPhotoPageRejectsNonHTTPSOwnerAvatarURL(t *testing.T) {
 		t.Fatal("expected error for non-https OwnerAvatarURL")
 	}
 }
+
+func TestRenderPhotoPageRejectsNonHTTPSMapEmbedURL(t *testing.T) {
+	_, err := RenderPhotoPage(testTemplate, PageData{
+		Title:        "t",
+		ImageURL:     "https://live.staticflickr.com/x/123_secret_b.jpg",
+		VideoURL:     "https://videos.example.com/123.mp4",
+		PhotoPageURL: "https://www.flickr.com/photos/lorello/123/",
+		MapEmbedURL:  "javascript:alert(1)",
+	})
+	if err == nil {
+		t.Fatal("expected error for non-https MapEmbedURL")
+	}
+}

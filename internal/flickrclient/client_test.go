@@ -287,6 +287,190 @@ func TestGetPhotoDetailsUsesDefaultAvatarWhenNoIconServer(t *testing.T) {
 	}
 }
 
+func TestGetPhotoDetailsExtractsLicenseAndDateUploaded(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat": "ok",
+			"photo": map[string]interface{}{
+				"owner":        map[string]interface{}{"nsid": "1@N00", "username": "x", "iconserver": "0"},
+				"dates":        map[string]interface{}{"taken": ""},
+				"dateuploaded": "1783985269",
+				"license":      "4",
+				"tags":         map[string]interface{}{"tag": []interface{}{}},
+			},
+		}), nil
+	})
+	client := makeClient()
+	details, err := client.GetPhotoDetails("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if details.DateUploaded != "2026-07-13" {
+		t.Fatalf("unexpected date uploaded: %s", details.DateUploaded)
+	}
+	if details.LicenseName != "CC BY 2.0" {
+		t.Fatalf("unexpected license name: %s", details.LicenseName)
+	}
+	if details.LicenseURL != "https://creativecommons.org/licenses/by/2.0/" {
+		t.Fatalf("unexpected license url: %s", details.LicenseURL)
+	}
+}
+
+func TestGetPhotoFavoritesCountReadsTotal(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat":  "ok",
+			"photo": map[string]interface{}{"total": float64(5)},
+		}), nil
+	})
+	client := makeClient()
+	count, err := client.GetPhotoFavoritesCount("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != "5" {
+		t.Fatalf("got %s", count)
+	}
+}
+
+func TestGetPhotoGeoReturnsHasGeoFalseWhenNotGeotagged(t *testing.T) {
+	withUnsignedGet(t, func(_ string, params map[string]string) (string, error) {
+		if params["method"] == "flickr.photos.geo.getPerms" {
+			return jsonBody(map[string]interface{}{"stat": "ok", "perms": map[string]interface{}{"ispublic": float64(1)}}), nil
+		}
+		return jsonBody(map[string]interface{}{"stat": "fail", "code": 2, "message": "Photo has no location information."}), nil
+	})
+	client := makeClient()
+	lat, lon, hasGeo, err := client.GetPhotoGeo("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hasGeo {
+		t.Fatal("expected hasGeo false")
+	}
+	if lat != "" || lon != "" {
+		t.Fatalf("expected empty lat/lon, got %s/%s", lat, lon)
+	}
+}
+
+func TestGetPhotoGeoReturnsCoordinatesWhenPresentAndPublic(t *testing.T) {
+	withUnsignedGet(t, func(_ string, params map[string]string) (string, error) {
+		if params["method"] == "flickr.photos.geo.getPerms" {
+			return jsonBody(map[string]interface{}{"stat": "ok", "perms": map[string]interface{}{"ispublic": float64(1)}}), nil
+		}
+		return jsonBody(map[string]interface{}{
+			"stat":  "ok",
+			"photo": map[string]interface{}{"location": map[string]interface{}{"latitude": "45.9", "longitude": "11.3"}},
+		}), nil
+	})
+	client := makeClient()
+	lat, lon, hasGeo, err := client.GetPhotoGeo("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasGeo {
+		t.Fatal("expected hasGeo true")
+	}
+	if lat != "45.9" || lon != "11.3" {
+		t.Fatalf("got %s/%s", lat, lon)
+	}
+}
+
+// TestGetPhotoGeoSuppressesPrivateLocation is the load-bearing test here:
+// verified live against a real photo where geo.getLocation happily returns
+// real coordinates to the authenticated owner while geo.getPerms says
+// ispublic=0 — showing that location on a public page would leak something
+// the owner deliberately marked private, independent of the photo's own
+// (public) visibility.
+func TestGetPhotoGeoSuppressesPrivateLocation(t *testing.T) {
+	locationCalled := false
+	withUnsignedGet(t, func(_ string, params map[string]string) (string, error) {
+		if params["method"] == "flickr.photos.geo.getPerms" {
+			return jsonBody(map[string]interface{}{
+				"stat": "ok", "perms": map[string]interface{}{"ispublic": float64(0), "isfamily": float64(1)},
+			}), nil
+		}
+		locationCalled = true
+		return jsonBody(map[string]interface{}{
+			"stat":  "ok",
+			"photo": map[string]interface{}{"location": map[string]interface{}{"latitude": "45.9", "longitude": "11.3"}},
+		}), nil
+	})
+	client := makeClient()
+	lat, lon, hasGeo, err := client.GetPhotoGeo("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hasGeo {
+		t.Fatal("expected hasGeo false when location is not public, even though real coordinates exist")
+	}
+	if lat != "" || lon != "" {
+		t.Fatalf("expected empty lat/lon for a private location, got %s/%s", lat, lon)
+	}
+	if locationCalled {
+		t.Fatal("expected geo.getLocation not to be called once getPerms says the location isn't public")
+	}
+}
+
+func TestGetPhotoGroupsExtractsPoolTitles(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat": "ok",
+			"pool": []interface{}{
+				map[string]interface{}{"title": "Sunsets"},
+				map[string]interface{}{"title": "Nature"},
+			},
+		}), nil
+	})
+	client := makeClient()
+	groups, err := client.GetPhotoGroups("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(groups) != 2 || groups[0] != "Sunsets" || groups[1] != "Nature" {
+		t.Fatalf("got %v", groups)
+	}
+}
+
+func TestGetPhotoGroupsReturnsEmptyWhenNoPools(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat": "ok",
+			"set":  []interface{}{map[string]interface{}{"title": "An album"}},
+		}), nil
+	})
+	client := makeClient()
+	groups, err := client.GetPhotoGroups("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(groups) != 0 {
+		t.Fatalf("expected no groups, got %v", groups)
+	}
+}
+
+func TestGetPhotoPeopleExtractsUsernames(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat": "ok",
+			"people": map[string]interface{}{
+				"person": []interface{}{
+					map[string]interface{}{"username": "alice"},
+					map[string]interface{}{"username": "bob"},
+				},
+			},
+		}), nil
+	})
+	client := makeClient()
+	people, err := client.GetPhotoPeople("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(people) != 2 || people[0] != "alice" || people[1] != "bob" {
+		t.Fatalf("got %v", people)
+	}
+}
+
 func TestGetPhotoExifExtractsCameraAndFormattedExposure(t *testing.T) {
 	withUnsignedGet(t, func(string, map[string]string) (string, error) {
 		return jsonBody(map[string]interface{}{

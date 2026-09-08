@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"motionphotos/internal/flickrclient"
@@ -19,6 +20,29 @@ import (
 	"motionphotos/internal/sitegen"
 	"motionphotos/internal/statestore"
 )
+
+// mapEmbedDelta sets how much area (in degrees) the OpenStreetMap embed
+// shows around the photo's coordinates.
+const mapEmbedDelta = 0.005
+
+// BuildMapEmbedURL builds an OpenStreetMap embed URL (no API key needed,
+// unlike Google Maps) centered on lat/lon, with a marker. Returns an error
+// if lat/lon aren't valid floats — callers should treat that as "skip the
+// map", not fail the whole publish.
+func BuildMapEmbedURL(lat, lon string) (string, error) {
+	latF, err := strconv.ParseFloat(lat, 64)
+	if err != nil {
+		return "", err
+	}
+	lonF, err := strconv.ParseFloat(lon, 64)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(
+		"https://www.openstreetmap.org/export/embed.html?bbox=%f,%f,%f,%f&marker=%f,%f",
+		lonF-mapEmbedDelta, latF-mapEmbedDelta, lonF+mapEmbedDelta, latF+mapEmbedDelta, latF, lonF,
+	), nil
+}
 
 const statusTagPrefix = "flickrmp:status="
 
@@ -51,6 +75,10 @@ type Reader interface {
 	GetPhotoDescription(photoID string) (string, error)
 	GetPhotoDetails(photoID string) (flickrclient.PhotoDetails, error)
 	GetPhotoExif(photoID string) (flickrclient.PhotoExif, error)
+	GetPhotoFavoritesCount(photoID string) (string, error)
+	GetPhotoGeo(photoID string) (lat, lon string, hasGeo bool, err error)
+	GetPhotoGroups(photoID string) ([]string, error)
+	GetPhotoPeople(photoID string) ([]string, error)
 }
 
 // Writer scrive metadati su Flickr (setMeta/addTags). L'implementazione
@@ -133,10 +161,20 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		return "", err
 	}
 
-	// EXIF is supplementary (the "additional information" panel): if it
-	// fails (e.g. unauthenticated client — getExif rejects anonymous
-	// calls), degrade gracefully instead of failing the whole publish.
+	// EXIF and everything below is supplementary (the "additional
+	// information" panel, map, groups, people): each degrades gracefully
+	// on its own if it fails, instead of failing the whole publish — e.g.
+	// getExif/getFavorites/etc. reject anonymous (unauthenticated) calls,
+	// and getGeo "fails" for any non-geotagged photo (the common case).
 	exif, _ := reader.GetPhotoExif(photo.ID)
+	favorites, _ := reader.GetPhotoFavoritesCount(photo.ID)
+	groups, _ := reader.GetPhotoGroups(photo.ID)
+	people, _ := reader.GetPhotoPeople(photo.ID)
+
+	var mapEmbedURL string
+	if lat, lon, hasGeo, geoErr := reader.GetPhotoGeo(photo.ID); geoErr == nil && hasGeo {
+		mapEmbedURL, _ = BuildMapEmbedURL(lat, lon)
+	}
 
 	// Fetched before rendering: the page shows the owner's *original*
 	// caption (StripOwnSentence removes our own appended sentence, which
@@ -157,9 +195,16 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		OwnerAvatarURL:   details.OwnerAvatarURL,
 		OwnerDescription: StripOwnSentence(currentDescription),
 		DateTaken:        details.DateTaken,
+		DateUploaded:     details.DateUploaded,
 		Tags:             details.Tags,
 		Views:            details.Views,
 		Comments:         details.Comments,
+		Favorites:        favorites,
+		LicenseName:      details.LicenseName,
+		LicenseURL:       details.LicenseURL,
+		MapEmbedURL:      mapEmbedURL,
+		Groups:           groups,
+		People:           people,
 		Camera:           exif.Camera,
 		ExposureTime:     exif.ExposureTime,
 		FNumber:          exif.FNumber,

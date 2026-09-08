@@ -36,6 +36,12 @@ func (f *fakeReader) GetPhotoDetails(photoID string) (flickrclient.PhotoDetails,
 func (f *fakeReader) GetPhotoExif(photoID string) (flickrclient.PhotoExif, error) {
 	return flickrclient.PhotoExif{}, nil
 }
+func (f *fakeReader) GetPhotoFavoritesCount(photoID string) (string, error) { return "", nil }
+func (f *fakeReader) GetPhotoGeo(photoID string) (string, string, bool, error) {
+	return "", "", false, nil
+}
+func (f *fakeReader) GetPhotoGroups(photoID string) ([]string, error) { return nil, nil }
+func (f *fakeReader) GetPhotoPeople(photoID string) ([]string, error) { return nil, nil }
 
 type fakeWriter struct {
 	setDescriptionCalls []string

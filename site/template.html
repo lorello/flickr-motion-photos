@@ -178,13 +178,80 @@
     padding: 4px 10px;
     border-radius: 999px;
   }
-  .comments {
-    display: block;
+  .stats {
+    display: flex;
+    gap: 14px;
+    font-size: 0.82rem;
+    color: #777;
+    margin-bottom: 14px;
+  }
+  .submeta {
+    font-size: 0.8rem;
+    color: #888;
+    margin-bottom: 14px;
+  }
+  .submeta a {
+    color: #128fdc;
+    text-decoration: none;
+  }
+  .section {
+    margin-bottom: 14px;
+  }
+  .section h2 {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #999;
+    margin: 0 0 8px;
+  }
+  .pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .pill {
+    background: #e6e9eb;
+    color: #555;
+    font-size: 0.8rem;
+    padding: 4px 10px;
+    border-radius: 999px;
+  }
+  .mapwrap {
+    width: 100%;
+    max-width: 420px;
+    margin-bottom: 14px;
+  }
+  .mapwrap iframe {
+    width: 100%;
+    height: 220px;
+    border: 0;
+    border-radius: 4px;
+  }
+  .commentsrow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 0;
+    border-top: 1px solid #e0e0e0;
+  }
+  .commentslabel {
     font-size: 0.85rem;
     font-weight: 700;
     color: #222;
-    padding: 14px 0;
-    border-top: 1px solid #e0e0e0;
+  }
+  .addcomment {
+    display: inline-block;
+    background: #128fdc;
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-decoration: none;
+    padding: 6px 14px;
+    border-radius: 999px;
+  }
+  .addcomment:hover {
+    background: #0f7bbd;
   }
   .infopanel {
     width: 100%;
@@ -262,15 +329,44 @@
         <span class="badge">Motion Photo</span>
         {{if .DateTaken}}<time>{{.DateTaken}}</time>{{end}}
       </div>
+      {{if or .Views .Favorites .Comments}}
+      <div class="stats">
+        {{if .Views}}<span>{{.Views}} views</span>{{end}}
+        {{if .Favorites}}<span>{{.Favorites}} faves</span>{{end}}
+        {{if .Comments}}<span>{{.Comments}} comments</span>{{end}}
+      </div>
+      {{end}}
       {{if .Tags}}
       <div class="tags">
         {{range .Tags}}<span class="tag">{{.}}</span>{{end}}
       </div>
       {{end}}
-      {{if or .Views .Camera}}
+      {{if .Groups}}
+      <div class="section">
+        <h2>Groups</h2>
+        <div class="pills">{{range .Groups}}<span class="pill">{{.}}</span>{{end}}</div>
+      </div>
+      {{end}}
+      {{if .People}}
+      <div class="section">
+        <h2>People</h2>
+        <div class="pills">{{range .People}}<span class="pill">{{.}}</span>{{end}}</div>
+      </div>
+      {{end}}
+      {{if or .DateUploaded .LicenseName}}
+      <div class="submeta">
+        {{if .DateUploaded}}Uploaded {{.DateUploaded}}{{end}}
+        {{if .LicenseName}} · <a href="{{.LicenseURL}}">{{.LicenseName}}</a>{{end}}
+      </div>
+      {{end}}
+      {{if .MapEmbedURL}}
+      <div class="mapwrap">
+        <iframe src="{{.MapEmbedURL}}" loading="lazy" title="Photo location"></iframe>
+      </div>
+      {{end}}
+      {{if .Camera}}
       <div class="infopanel">
         <table>
-          {{if .Views}}<tr><th>Views</th><td>{{.Views}}</td></tr>{{end}}
           {{if .Camera}}<tr><th>Camera</th><td>{{.Camera}}</td></tr>{{end}}
           {{if .ExposureTime}}<tr><th>Exposure</th><td>{{.ExposureTime}}</td></tr>{{end}}
           {{if .FNumber}}<tr><th>Aperture</th><td>{{.FNumber}}</td></tr>{{end}}
@@ -279,7 +375,10 @@
         </table>
       </div>
       {{end}}
-      {{if .Comments}}<span class="comments">Comments ({{.Comments}})</span>{{end}}
+      <div class="commentsrow">
+        <span class="commentslabel">Comments ({{if .Comments}}{{.Comments}}{{else}}0{{end}})</span>
+        <a class="addcomment" href="{{.PhotoPageURL}}">Add a comment</a>
+      </div>
     </div>
     <footer>
       <p class="disclaimer">Built using the Flickr API. Not affiliated with, endorsed by, or a product of Flickr / SmugMug.</p>

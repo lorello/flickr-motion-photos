@@ -11,9 +11,43 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"motionphotos/internal/flickroauth"
 )
+
+// licenseNames/licenseURLs map Flickr's license ID (from getInfo's "license"
+// field) to a human name and its canonical URL. This table is Flickr's own
+// stable, official enumeration (flickr.photos.licenses.getInfo) — hardcoded
+// rather than fetched per photo since it's global, not per-photo, data.
+var licenseNames = map[string]string{
+	"0": "All Rights Reserved", "1": "CC BY-NC-SA 2.0", "2": "CC BY-NC 2.0",
+	"3": "CC BY-NC-ND 2.0", "4": "CC BY 2.0", "5": "CC BY-SA 2.0", "6": "CC BY-ND 2.0",
+	"7": "No known copyright restrictions", "8": "United States Government Work",
+	"9": "Public Domain Dedication (CC0)", "10": "Public Domain Mark",
+	"11": "CC BY 4.0", "12": "CC BY-SA 4.0", "13": "CC BY-ND 4.0",
+	"14": "CC BY-NC 4.0", "15": "CC BY-NC-SA 4.0", "16": "CC BY-NC-ND 4.0",
+}
+
+var licenseURLs = map[string]string{
+	"0":  "https://www.flickrhelp.com/hc/en-us/articles/10710266545556-Using-Flickr-images-shared-by-other-members",
+	"1":  "https://creativecommons.org/licenses/by-nc-sa/2.0/",
+	"2":  "https://creativecommons.org/licenses/by-nc/2.0/",
+	"3":  "https://creativecommons.org/licenses/by-nc-nd/2.0/",
+	"4":  "https://creativecommons.org/licenses/by/2.0/",
+	"5":  "https://creativecommons.org/licenses/by-sa/2.0/",
+	"6":  "https://creativecommons.org/licenses/by-nd/2.0/",
+	"7":  "https://www.flickr.com/commons/usage/",
+	"8":  "https://www.usa.gov/government-copyright",
+	"9":  "https://creativecommons.org/publicdomain/zero/1.0/",
+	"10": "https://creativecommons.org/publicdomain/mark/1.0/",
+	"11": "https://creativecommons.org/licenses/by/4.0/",
+	"12": "https://creativecommons.org/licenses/by-sa/4.0/",
+	"13": "https://creativecommons.org/licenses/by-nd/4.0/",
+	"14": "https://creativecommons.org/licenses/by-nc/4.0/",
+	"15": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+	"16": "https://creativecommons.org/licenses/by-nc-nd/4.0/",
+}
 
 const apiURL = "https://api.flickr.com/services/rest"
 
@@ -173,9 +207,12 @@ type PhotoDetails struct {
 	OwnerName      string
 	OwnerAvatarURL string
 	DateTaken      string
+	DateUploaded   string
 	Tags           []string
 	Views          string
 	Comments       string
+	LicenseName    string
+	LicenseURL     string
 }
 
 // GetPhotoDetails returns owner/avatar/date/tags for the viewer page.
@@ -218,7 +255,117 @@ func (c *Client) GetPhotoDetails(photoID string) (PhotoDetails, error) {
 	commentsObj, _ := info["comments"].(map[string]interface{})
 	comments, _ := commentsObj["_content"].(string)
 
-	return PhotoDetails{OwnerName: username, OwnerAvatarURL: avatarURL, DateTaken: dateTaken, Tags: tags, Views: views, Comments: comments}, nil
+	var dateUploaded string
+	if rawUploaded, _ := info["dateuploaded"].(string); rawUploaded != "" {
+		if secs, err := strconv.ParseInt(rawUploaded, 10, 64); err == nil {
+			dateUploaded = time.Unix(secs, 0).UTC().Format("2006-01-02")
+		}
+	}
+
+	licenseID, _ := info["license"].(string)
+
+	return PhotoDetails{
+		OwnerName: username, OwnerAvatarURL: avatarURL,
+		DateTaken: dateTaken, DateUploaded: dateUploaded,
+		Tags: tags, Views: views, Comments: comments,
+		LicenseName: licenseNames[licenseID], LicenseURL: licenseURLs[licenseID],
+	}, nil
+}
+
+// GetPhotoFavoritesCount returns how many users have favorited the photo,
+// via a single flickr.photos.getFavorites call with per_page=1 (we only
+// need the "total" count, not the list of favoriters).
+func (c *Client) GetPhotoFavoritesCount(photoID string) (string, error) {
+	result, err := c.Call("flickr.photos.getFavorites", map[string]string{"photo_id": photoID, "per_page": "1"})
+	if err != nil {
+		return "", err
+	}
+	photo, _ := result["photo"].(map[string]interface{})
+	total, ok := photo["total"].(float64)
+	if !ok {
+		return "0", nil
+	}
+	return strconv.Itoa(int(total)), nil
+}
+
+// GetPhotoGeo returns the photo's latitude/longitude if it has one AND its
+// location is public. hasGeo is false (no error) both when the photo isn't
+// geotagged and when its location is private/friends/family-only — Flickr
+// lets an owner mark a public photo's *location* private independently of
+// the photo itself (geo.getLocation happily returns coordinates to the
+// authenticated owner regardless), so skipping the geo.getPerms check
+// would leak a location the owner deliberately didn't make public onto
+// this page. Verified live: a real photo here had ispublic=0, isfamily=1.
+func (c *Client) GetPhotoGeo(photoID string) (lat, lon string, hasGeo bool, err error) {
+	permsResult, permsErr := c.Call("flickr.photos.geo.getPerms", map[string]string{"photo_id": photoID})
+	if permsErr != nil {
+		var apiErr *APIError
+		if errors.As(permsErr, &apiErr) {
+			return "", "", false, nil // can't confirm the location is public -> don't show it
+		}
+		return "", "", false, permsErr
+	}
+	perms, _ := permsResult["perms"].(map[string]interface{})
+	isPublic, _ := perms["ispublic"].(float64)
+	if isPublic != 1 {
+		return "", "", false, nil
+	}
+
+	result, callErr := c.Call("flickr.photos.geo.getLocation", map[string]string{"photo_id": photoID})
+	if callErr != nil {
+		var apiErr *APIError
+		if errors.As(callErr, &apiErr) {
+			return "", "", false, nil
+		}
+		return "", "", false, callErr
+	}
+	photo, _ := result["photo"].(map[string]interface{})
+	location, _ := photo["location"].(map[string]interface{})
+	lat, _ = location["latitude"].(string)
+	lon, _ = location["longitude"].(string)
+	if lat == "" || lon == "" {
+		return "", "", false, nil
+	}
+	return lat, lon, true, nil
+}
+
+// GetPhotoGroups returns the names of the groups (pools) this photo has
+// been added to, if any.
+func (c *Client) GetPhotoGroups(photoID string) ([]string, error) {
+	result, err := c.Call("flickr.photos.getAllContexts", map[string]string{"photo_id": photoID})
+	if err != nil {
+		return nil, err
+	}
+	rawPools, _ := result["pool"].([]interface{})
+	groups := make([]string, 0, len(rawPools))
+	for _, item := range rawPools {
+		p, _ := item.(map[string]interface{})
+		title, _ := p["title"].(string)
+		if title != "" {
+			groups = append(groups, title)
+		}
+	}
+	return groups, nil
+}
+
+// GetPhotoPeople returns the usernames of people tagged in this photo, if
+// any.
+func (c *Client) GetPhotoPeople(photoID string) ([]string, error) {
+	result, err := c.Call("flickr.photos.people.getList", map[string]string{"photo_id": photoID})
+	if err != nil {
+		return nil, err
+	}
+	peopleObj, _ := result["people"].(map[string]interface{})
+	rawPeople, _ := peopleObj["person"].([]interface{})
+	people := make([]string, 0, len(rawPeople))
+	for _, item := range rawPeople {
+		p, _ := item.(map[string]interface{})
+		username, _ := p["username"].(string)
+		if username != "" {
+			people = append(people, username)
+		}
+	}
+	return people, nil
 }
 
 // PhotoExif carries camera/exposure info for the viewer page's "additional
