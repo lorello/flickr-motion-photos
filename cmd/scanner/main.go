@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"motionphotos/internal/dotenv"
 	"motionphotos/internal/flickrclient"
 	"motionphotos/internal/r2upload"
 	"motionphotos/internal/scanner"
@@ -29,6 +30,8 @@ func main() {
 	photosetID := flag.String("photoset-id", "", "If set, scan only this album instead of the whole photostream")
 	dryRun := flag.Bool("dry-run", false, "Simulate Flickr description/tag writes instead of writing for real")
 	flag.Parse()
+
+	dotenv.Load(filepath.Join(*repoRoot, ".env"))
 
 	apiKey := os.Getenv("FLICKRGO_API_KEY")
 	apiSecret := os.Getenv("FLICKRGO_API_SECRET")

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"motionphotos/internal/dotenv"
 	"motionphotos/internal/flickrclient"
 	"motionphotos/internal/plausible"
 	"motionphotos/internal/r2upload"
@@ -25,6 +26,8 @@ func main() {
 	cacheDir := flag.String("cache-dir", os.TempDir(), "Local state cache directory")
 	repoRoot := flag.String("repo-root", ".", "Repository root containing site/template.html")
 	flag.Parse()
+
+	dotenv.Load(filepath.Join(*repoRoot, ".env"))
 
 	apiKey := os.Getenv("FLICKRGO_API_KEY")
 	apiSecret := os.Getenv("FLICKRGO_API_SECRET")

@@ -11,10 +11,13 @@ import (
 	"os"
 	"strings"
 
+	"motionphotos/internal/dotenv"
 	"motionphotos/internal/flickroauth"
 )
 
 func main() {
+	dotenv.Load(".env")
+
 	consumerKey := os.Getenv("FLICKRGO_API_KEY")
 	consumerSecret := os.Getenv("FLICKRGO_API_SECRET")
 	if consumerKey == "" || consumerSecret == "" {
