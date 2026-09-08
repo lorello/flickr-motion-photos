@@ -187,7 +187,7 @@ func TestGetPhotoOriginalBytesFailsOnNonOKStatus(t *testing.T) {
 
 func TestCdnCooldownWaitsUntilBlockedUntilElapses(t *testing.T) {
 	c := &cdnCooldown{nextBackoff: time.Minute}
-	c.recordRateLimited() // sets blockedUntil ~1 minute out
+	c.recordRateLimited("https://example.com/test.jpg") // sets blockedUntil ~1 minute out
 
 	var slept time.Duration
 	orig := sleepFunc
@@ -217,13 +217,13 @@ func TestCdnCooldownDoesNotWaitWhenNotBlocked(t *testing.T) {
 func TestCdnCooldownBackoffEscalatesAndResetsOnSuccess(t *testing.T) {
 	c := &cdnCooldown{nextBackoff: time.Minute}
 
-	c.recordRateLimited()
+	c.recordRateLimited("https://example.com/test.jpg")
 	firstBackoff := c.nextBackoff
 	if firstBackoff != 2*time.Minute {
 		t.Fatalf("expected backoff to double to 2m after first rate limit, got %v", firstBackoff)
 	}
 
-	c.recordRateLimited()
+	c.recordRateLimited("https://example.com/test.jpg")
 	if c.nextBackoff != 4*time.Minute {
 		t.Fatalf("expected backoff to double to 4m after second rate limit, got %v", c.nextBackoff)
 	}

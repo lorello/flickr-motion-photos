@@ -114,11 +114,11 @@ func (c *cdnCooldown) waitIfBlocked() {
 	}
 }
 
-func (c *cdnCooldown) recordRateLimited() {
+func (c *cdnCooldown) recordRateLimited(url string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.blockedUntil = time.Now().Add(c.nextBackoff)
-	fmt.Fprintf(os.Stderr, "[%s] [COOLDOWN] 429 received, next wait %s\n", time.Now().Format("15:04:05"), c.nextBackoff)
+	fmt.Fprintf(os.Stderr, "[%s] [COOLDOWN] 429 on %s, next wait %s\n", time.Now().Format("15:04:05"), url, c.nextBackoff)
 	if c.nextBackoff < 30*time.Minute {
 		c.nextBackoff *= 2
 	}
@@ -136,7 +136,7 @@ func curlDownload(rawURL string) (body []byte, statusCode int, err error) {
 	body, statusCode, err = curlDownloadOnce(rawURL)
 	if err == nil {
 		if statusCode == http.StatusTooManyRequests {
-			downloadCooldown.recordRateLimited()
+			downloadCooldown.recordRateLimited(rawURL)
 		} else {
 			downloadCooldown.recordSuccess()
 		}
