@@ -170,6 +170,24 @@ func TestFindUserIDByUsername(t *testing.T) {
 	}
 }
 
+func TestGetPhotoDisplayURLBuildsLargeSizeURLWithoutOAuth(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat":  "ok",
+			"photo": map[string]interface{}{"id": "999", "server": "65535", "secret": "abc123"},
+		}), nil
+	})
+	client := makeClient()
+	url, err := client.GetPhotoDisplayURL("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "https://live.staticflickr.com/65535/999_abc123_b.jpg"
+	if url != want {
+		t.Fatalf("got %s, want %s", url, want)
+	}
+}
+
 func TestAddTagCallsAddTags(t *testing.T) {
 	var capturedParams map[string]string
 	withUnsignedGet(t, func(_ string, params map[string]string) (string, error) {

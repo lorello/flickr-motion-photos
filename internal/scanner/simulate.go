@@ -2,9 +2,11 @@ package scanner
 
 import "fmt"
 
-// SimulatingWriter/Uploader/Publisher non toccano mai Flickr/R2/git: loggano
-// solo cosa farebbero. Usati finché non c'è un access token OAuth per le
-// scritture reali (vedi commento in scanner.go).
+// SimulatingWriter/Uploader/Publisher never touch Flickr/R2: they just log
+// what they would do. SimulatingWriter is used by default for Flickr writes
+// (setMeta/addTags) until real writes are explicitly enabled; Simulating
+// Uploader/Publisher exist for --dry-run / testing even though the default
+// wiring in cmd/scanner uses the real R2-backed ones.
 
 type SimulatingWriter struct{}
 
@@ -29,10 +31,11 @@ func (u SimulatingUploader) UploadVideo(photoID string, videoBytes []byte) (stri
 }
 
 type SimulatingPublisher struct {
-	ViewerBaseURL string
+	PublicBaseURL string
 }
 
-func (p SimulatingPublisher) PublishPage(photoID string) error {
-	fmt.Printf("[SIMULATE] write site/p/%s.html + git commit+push -> %s/p/%s.html\n", photoID, p.ViewerBaseURL, photoID)
-	return nil
+func (p SimulatingPublisher) PublishPage(photoID, html string) (string, error) {
+	url := fmt.Sprintf("%s/p/%s.html", p.PublicBaseURL, photoID)
+	fmt.Printf("[SIMULATE] publish page photo_id=%s bytes=%d -> %s\n", photoID, len(html), url)
+	return url, nil
 }

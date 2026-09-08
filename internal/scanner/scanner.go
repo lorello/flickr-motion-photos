@@ -1,13 +1,11 @@
 // Package scanner orchestra scansione, rilevamento e pubblicazione delle
 // motion photo. Le dipendenze a effetto (lettura Flickr, scrittura Flickr,
 // upload video, pubblicazione pagina) sono isolate dietro interfacce
-// piccole apposta: oggi Writer/Uploader/Publisher hanno solo
-// un'implementazione "Simulating" che logga invece di scrivere davvero
-// (nessun OAuth disponibile ancora, per scelta si opera in sola lettura).
-// Il giorno che serve scrivere per davvero, si aggiunge un'implementazione
-// "Real" di ciascuna interfaccia (già progettate in
-// docs/superpowers/plans/2026-09-07-motion-photo-viewer.md, Task 3/5/6) e
-// si sostituisce nel main — ProcessPhoto/Run non cambiano.
+// piccole apposta: Uploader/Publisher sono backed da R2 (internal/r2upload),
+// Writer resta un'implementazione "Simulating" che logga invece di
+// scrivere davvero su Flickr, finché non si decide di attivare le
+// scritture reali — si sostituisce solo nel main, ProcessPhoto/Run non
+// cambiano.
 package scanner
 
 import (
@@ -17,6 +15,7 @@ import (
 
 	"motionphotos/internal/flickrclient"
 	"motionphotos/internal/motiondetect"
+	"motionphotos/internal/sitegen"
 	"motionphotos/internal/statestore"
 )
 
@@ -29,6 +28,7 @@ const statusTagPrefix = "flickrmp:status="
 type Reader interface {
 	GetPhotosPage(userID string, page, perPage int) ([]flickrclient.Photo, error)
 	GetPhotoOriginalBytes(photoID string) ([]byte, error)
+	GetPhotoDisplayURL(photoID string) (string, error)
 	GetPhotoDescription(photoID string) (string, error)
 }
 
@@ -39,15 +39,15 @@ type Writer interface {
 	AddTag(photoID, tag string) error
 }
 
-// Uploader carica il video estratto da qualche parte (R2 in futuro) e
-// ritorna l'URL pubblico.
+// Uploader carica il video estratto (su R2) e ritorna l'URL pubblico.
 type Uploader interface {
 	UploadVideo(photoID string, videoBytes []byte) (string, error)
 }
 
-// Publisher pubblica la pagina viewer statica (git commit+push in futuro).
+// Publisher pubblica la pagina viewer statica (su R2, stesso bucket dei
+// video) e ritorna l'URL pubblico della pagina.
 type Publisher interface {
-	PublishPage(photoID string) error
+	PublishPage(photoID, html string) (string, error)
 }
 
 // detectMotionPhotoFunc è iniettabile nei test.
@@ -69,7 +69,7 @@ func alreadyTagged(tags []string) bool {
 // fallimento di rete/CDN transitorio (es. 502 da live.staticflickr.com).
 // Nessuno dei due casi di errore è fatale né viene salvato in cache: si
 // ritenta al prossimo run.
-func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Publisher, store statestore.Store, viewerBaseURL string, photo flickrclient.Photo) (string, error) {
+func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Publisher, store statestore.Store, template, username string, photo flickrclient.Photo) (string, error) {
 	if alreadyTagged(photo.Tags) {
 		return "skipped(flickr-tag)", nil
 	}
@@ -97,15 +97,26 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		return result.Reason, nil
 	}
 
-	viewerURL := fmt.Sprintf("%s/p/%s.html", viewerBaseURL, photo.ID)
-
 	videoURL, err := uploader.UploadVideo(photo.ID, result.VideoBytes)
 	if err != nil {
 		return "", err
 	}
-	_ = videoURL
 
-	if err := publisher.PublishPage(photo.ID); err != nil {
+	imageURL, err := reader.GetPhotoDisplayURL(photo.ID)
+	if err != nil {
+		return "", err
+	}
+
+	html := sitegen.RenderPhotoPage(template, sitegen.PageData{
+		PhotoID:      photo.ID,
+		Title:        photo.Title,
+		ImageURL:     imageURL,
+		VideoURL:     videoURL,
+		PhotoPageURL: fmt.Sprintf("https://www.flickr.com/photos/%s/%s/", username, photo.ID),
+	})
+
+	viewerURL, err := publisher.PublishPage(photo.ID, html)
+	if err != nil {
 		return "", err
 	}
 
@@ -132,7 +143,7 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 
 // Run scansiona tutte le pagine di foto dell'utente fino a limit (limit < 0
 // = illimitato), processando ogni foto e stampando lo stato risultante.
-func Run(reader Reader, writer Writer, uploader Uploader, publisher Publisher, store statestore.Store, userID, viewerBaseURL string, limit int) error {
+func Run(reader Reader, writer Writer, uploader Uploader, publisher Publisher, store statestore.Store, userID, username, template string, limit int) error {
 	processed := 0
 	page := 1
 	for limit < 0 || processed < limit {
@@ -147,7 +158,7 @@ func Run(reader Reader, writer Writer, uploader Uploader, publisher Publisher, s
 			if limit >= 0 && processed >= limit {
 				break
 			}
-			status, err := ProcessPhoto(reader, writer, uploader, publisher, store, viewerBaseURL, photo)
+			status, err := ProcessPhoto(reader, writer, uploader, publisher, store, template, username, photo)
 			if err != nil {
 				return fmt.Errorf("photo %s: %w", photo.ID, err)
 			}

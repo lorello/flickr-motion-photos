@@ -247,6 +247,21 @@ func (c *Client) GetPhotoOriginalURL(photoID string) (string, error) {
 	return fmt.Sprintf("https://live.staticflickr.com/%s/%s_%s_o.%s", server, id, secret, format), nil
 }
 
+// GetPhotoDisplayURL returns a public "large" (1024px) display-size JPEG
+// URL, built from the plain secret/server fields that getInfo always
+// returns (no OAuth needed, unlike the original). Used for the viewer
+// page's <img>, which doesn't need the full-resolution original.
+func (c *Client) GetPhotoDisplayURL(photoID string) (string, error) {
+	info, err := c.getPhotoInfo(photoID)
+	if err != nil {
+		return "", err
+	}
+	server, _ := info["server"].(string)
+	id, _ := info["id"].(string)
+	secret, _ := info["secret"].(string)
+	return fmt.Sprintf("https://live.staticflickr.com/%s/%s_%s_b.jpg", server, id, secret), nil
+}
+
 func (c *Client) GetPhotoOriginalBytes(photoID string) ([]byte, error) {
 	url, err := c.GetPhotoOriginalURL(photoID)
 	if err != nil {

@@ -10,10 +10,14 @@ import (
 	"motionphotos/internal/statestore"
 )
 
+const testTemplate = `<!doctype html><title>{{TITLE}}</title><img src="{{IMAGE_URL}}"><video src="{{VIDEO_URL}}"></video><a href="{{PHOTO_PAGE_URL}}"></a>`
+const testUsername = "testuser"
+
 type fakeReader struct {
 	originalBytes []byte
 	originalErr   error
 	description   string
+	displayURL    string
 }
 
 func (f *fakeReader) GetPhotosPage(userID string, page, perPage int) ([]flickrclient.Photo, error) {
@@ -21,6 +25,9 @@ func (f *fakeReader) GetPhotosPage(userID string, page, perPage int) ([]flickrcl
 }
 func (f *fakeReader) GetPhotoOriginalBytes(photoID string) ([]byte, error) {
 	return f.originalBytes, f.originalErr
+}
+func (f *fakeReader) GetPhotoDisplayURL(photoID string) (string, error) {
+	return f.displayURL, nil
 }
 func (f *fakeReader) GetPhotoDescription(photoID string) (string, error) { return f.description, nil }
 
@@ -47,9 +54,9 @@ func (f *fakeUploader) UploadVideo(photoID string, videoBytes []byte) (string, e
 
 type fakePublisher struct{ called bool }
 
-func (f *fakePublisher) PublishPage(photoID string) error {
+func (f *fakePublisher) PublishPage(photoID, html string) (string, error) {
 	f.called = true
-	return nil
+	return "https://viewer.example.com/p/" + photoID + ".html", nil
 }
 
 func newFakeStore(t *testing.T) statestore.Store {
@@ -63,7 +70,7 @@ func newFakeStore(t *testing.T) statestore.Store {
 
 func TestProcessPhotoSkipsIfAlreadyTaggedOnFlickr(t *testing.T) {
 	photo := flickrclient.Photo{ID: "1", Title: "t", Tags: []string{"flickrmp:status=published"}}
-	status, err := ProcessPhoto(&fakeReader{}, &fakeWriter{}, &fakeUploader{}, &fakePublisher{}, newFakeStore(t), "https://viewer.example.com", photo)
+	status, err := ProcessPhoto(&fakeReader{}, &fakeWriter{}, &fakeUploader{}, &fakePublisher{}, newFakeStore(t), testTemplate, testUsername, photo)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -76,7 +83,7 @@ func TestProcessPhotoSkipsIfAlreadyInCache(t *testing.T) {
 	store := newFakeStore(t)
 	store.Set("2", statestore.Record{Status: "checked"})
 	photo := flickrclient.Photo{ID: "2", Title: "t"}
-	status, err := ProcessPhoto(&fakeReader{}, &fakeWriter{}, &fakeUploader{}, &fakePublisher{}, store, "https://viewer.example.com", photo)
+	status, err := ProcessPhoto(&fakeReader{}, &fakeWriter{}, &fakeUploader{}, &fakePublisher{}, store, testTemplate, testUsername, photo)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -90,7 +97,7 @@ func TestProcessPhotoBlockedWithoutOAuthDoesNotError(t *testing.T) {
 	photo := flickrclient.Photo{ID: "3", Title: "t"}
 	store := newFakeStore(t)
 
-	status, err := ProcessPhoto(reader, &fakeWriter{}, &fakeUploader{}, &fakePublisher{}, store, "https://viewer.example.com", photo)
+	status, err := ProcessPhoto(reader, &fakeWriter{}, &fakeUploader{}, &fakePublisher{}, store, testTemplate, testUsername, photo)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -107,7 +114,7 @@ func TestProcessPhotoDownloadErrorDoesNotError(t *testing.T) {
 	photo := flickrclient.Photo{ID: "3b", Title: "t"}
 	store := newFakeStore(t)
 
-	status, err := ProcessPhoto(reader, &fakeWriter{}, &fakeUploader{}, &fakePublisher{}, store, "https://viewer.example.com", photo)
+	status, err := ProcessPhoto(reader, &fakeWriter{}, &fakeUploader{}, &fakePublisher{}, store, testTemplate, testUsername, photo)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -131,7 +138,7 @@ func TestProcessPhotoCheckedWhenNotMotion(t *testing.T) {
 	store := newFakeStore(t)
 	photo := flickrclient.Photo{ID: "4", Title: "t"}
 
-	status, err := ProcessPhoto(reader, writer, &fakeUploader{}, &fakePublisher{}, store, "https://viewer.example.com", photo)
+	status, err := ProcessPhoto(reader, writer, &fakeUploader{}, &fakePublisher{}, store, testTemplate, testUsername, photo)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -154,14 +161,14 @@ func TestProcessPhotoPublishedFullFlowSimulated(t *testing.T) {
 	}
 	t.Cleanup(func() { detectMotionPhotoFunc = orig })
 
-	reader := &fakeReader{originalBytes: []byte("JPEGDATA"), description: "Descrizione originale"}
+	reader := &fakeReader{originalBytes: []byte("JPEGDATA"), description: "Descrizione originale", displayURL: "https://live.staticflickr.com/x/5_secret_b.jpg"}
 	writer := &fakeWriter{}
 	uploader := &fakeUploader{}
 	publisher := &fakePublisher{}
 	store := newFakeStore(t)
 	photo := flickrclient.Photo{ID: "5", Title: "PXL_5.MP"}
 
-	status, err := ProcessPhoto(reader, writer, uploader, publisher, store, "https://viewer.example.com", photo)
+	status, err := ProcessPhoto(reader, writer, uploader, publisher, store, testTemplate, testUsername, photo)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -195,12 +202,13 @@ func TestProcessPhotoIdempotentSkipsDescriptionIfLinkAlreadyPresent(t *testing.T
 	reader := &fakeReader{
 		originalBytes: []byte("JPEGDATA"),
 		description:   "Motion-Photo viewer: questa è una foto motion, guardala su https://viewer.example.com/p/6.html",
+		displayURL:    "https://live.staticflickr.com/x/6_secret_b.jpg",
 	}
 	writer := &fakeWriter{}
 	store := newFakeStore(t)
 	photo := flickrclient.Photo{ID: "6", Title: "PXL_6.MP"}
 
-	status, err := ProcessPhoto(reader, writer, &fakeUploader{}, &fakePublisher{}, store, "https://viewer.example.com", photo)
+	status, err := ProcessPhoto(reader, writer, &fakeUploader{}, &fakePublisher{}, store, testTemplate, testUsername, photo)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
