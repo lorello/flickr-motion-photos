@@ -135,48 +135,49 @@ func alreadyTagged(tags []string) bool {
 // non è scaricabile senza un access token OAuth, o "download-error" per un
 // fallimento di rete/CDN transitorio (es. 502 da live.staticflickr.com).
 // Nessuno dei due casi di errore è fatale né viene salvato in cache: si
-// ritenta al prossimo run.
-func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Publisher, store statestore.Store, template, username string, photo flickrclient.Photo) (string, error) {
+// ritenta al prossimo run. viewerURL è non vuoto solo quando status è
+// "published" — utile per il logging del chiamante.
+func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Publisher, store statestore.Store, template, username string, photo flickrclient.Photo) (status string, viewerURL string, err error) {
 	if alreadyTagged(photo.Tags) {
-		return "skipped(flickr-tag)", nil
+		return "skipped(flickr-tag)", "", nil
 	}
 	if _, ok := store.Get(photo.ID); ok {
-		return "skipped(cache)", nil
+		return "skipped(cache)", "", nil
 	}
 
 	jpegBytes, err := reader.GetPhotoOriginalBytes(photo.ID)
 	if err != nil {
 		if errors.Is(err, flickrclient.ErrOriginalNotAvailable) {
-			return "blocked-no-oauth", nil
+			return "blocked-no-oauth", "", nil
 		}
-		return "download-error", nil //nolint:nilerr // transitorio (rete/CDN): si ritenta al prossimo run, non è un errore dello scanner
+		return "download-error", "", nil //nolint:nilerr // transitorio (rete/CDN): si ritenta al prossimo run, non è un errore dello scanner
 	}
 
 	result := detectMotionPhotoFunc(jpegBytes)
 
 	if !result.IsMotion {
 		if err := store.Set(photo.ID, statestore.Record{Status: result.Reason}); err != nil {
-			return "", err
+			return "", "", err
 		}
 		if err := writer.AddTag(photo.ID, statusTagPrefix+result.Reason); err != nil {
-			return "", err
+			return "", "", err
 		}
-		return result.Reason, nil
+		return result.Reason, "", nil
 	}
 
 	videoURL, err := uploader.UploadVideo(photo.ID, result.VideoBytes)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	imageURL, err := reader.GetPhotoDisplayURL(photo.ID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	details, err := reader.GetPhotoDetails(photo.ID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	// EXIF and everything below is supplementary (the "additional
@@ -208,7 +209,7 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 	// the same value is reused below for the idempotent description check.
 	currentDescription, err := reader.GetPhotoDescription(photo.ID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	pageHTML, err := sitegen.RenderPhotoPage(template, sitegen.PageData{
@@ -239,12 +240,12 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		FocalLength:      exif.FocalLength,
 	})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
-	viewerURL, err := publisher.PublishPage(photo.ID, pageHTML)
+	viewerURL, err = publisher.PublishPage(photo.ID, pageHTML)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	if !strings.Contains(currentDescription, viewerURL) {
@@ -252,17 +253,17 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		sentence := motionPhotoSentencePrefix + `<a href="` + html.EscapeString(descriptionLinkURL) + `" rel="noreferrer nofollow">watch the video</a>`
 		newDescription := strings.TrimSpace(currentDescription + "\n\n" + sentence)
 		if err := writer.SetDescription(photo.ID, newDescription); err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
 
 	if err := writer.AddTag(photo.ID, statusTagPrefix+"published"); err != nil {
-		return "", err
+		return "", "", err
 	}
 	if err := store.Set(photo.ID, statestore.Record{Status: "published"}); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return "published", nil
+	return "published", viewerURL, nil
 }
 
 // Run scansiona tutte le pagine di foto dell'utente fino a limit (limit < 0
@@ -282,11 +283,11 @@ func Run(reader Reader, writer Writer, uploader Uploader, publisher Publisher, s
 			if limit >= 0 && processed >= limit {
 				break
 			}
-			status, err := ProcessPhoto(reader, writer, uploader, publisher, store, template, username, photo)
+			status, viewerURL, err := ProcessPhoto(reader, writer, uploader, publisher, store, template, username, photo)
 			if err != nil {
 				return fmt.Errorf("photo %s: %w", photo.ID, err)
 			}
-			fmt.Printf("%s\t%s\t%s\t%s\n", time.Now().Format("15:04:05"), photo.ID, status, photo.Title)
+			fmt.Printf("%s\t%s\t%s\t%s\t%s\n", time.Now().Format("15:04:05"), photo.ID, status, photo.Title, viewerURL)
 			if !strings.HasPrefix(status, "skipped") {
 				processed++
 			}

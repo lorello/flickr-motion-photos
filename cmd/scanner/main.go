@@ -119,12 +119,12 @@ func main() {
 			if *limit >= 0 && processed >= *limit {
 				break
 			}
-			status, err := scanner.ProcessPhoto(client, writer, uploader, publisher, store, string(templateBytes), *username, photo)
+			status, viewerURL, err := scanner.ProcessPhoto(client, writer, uploader, publisher, store, string(templateBytes), *username, photo)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "error:", err)
 				os.Exit(1)
 			}
-			fmt.Printf("%s\t%s\t%s\t%s\n", time.Now().Format("15:04:05"), photo.ID, status, photo.Title)
+			fmt.Printf("%s\t%s\t%s\t%s\t%s\n", time.Now().Format("15:04:05"), photo.ID, status, photo.Title, viewerURL)
 			if status != "skipped(flickr-tag)" && status != "skipped(cache)" {
 				processed++
 			}
