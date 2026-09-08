@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{.Title}}</title>
+<title>{{.Title}} · Flickr Motion Photo Viewer</title>
 <!-- Privacy-friendly analytics by Plausible -->
 <script async src="https://plausible.io/js/pa-UgXLJ3iDFx7E8L29683bk.js"></script>
 <script>
@@ -21,6 +21,17 @@
     flex-direction: column;
     align-items: center;
     min-height: 100vh;
+  }
+  .brandbar {
+    width: 100%;
+    background: #0063dc;
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.85rem;
+    letter-spacing: 0.02em;
+    text-align: center;
+    padding: 6px 12px;
+    box-sizing: border-box;
   }
   header {
     width: 100%;
@@ -175,9 +186,15 @@
     color: #999;
     text-decoration: underline;
   }
+  .disclaimer {
+    color: #555;
+    font-size: 0.72rem;
+    margin: 0 0 6px;
+  }
 </style>
 </head>
 <body>
+  <div class="brandbar">Flickr Motion Photo Viewer</div>
   <header>
     {{if .OwnerName}}
     <div class="owner">
@@ -210,6 +227,7 @@
     {{end}}
   </div>
   <footer>
+    <p class="disclaimer">Built using the Flickr API. Not affiliated with, endorsed by, or a product of Flickr / SmugMug.</p>
     <a href="https://www.flickr.com/groups/14903850@N24/discuss/">Questions or bugs?</a>
   </footer>
   <script>
