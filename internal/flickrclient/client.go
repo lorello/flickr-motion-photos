@@ -72,7 +72,32 @@ var httpGetFunc = http.Get
 // Iniettabile nei test.
 var downloadOriginalFunc = curlDownload
 
+const (
+	// downloadThrottle: pausa proattiva prima di ogni download, per non
+	// bombardare il CDN durante una scansione di migliaia di foto.
+	downloadThrottle = 300 * time.Millisecond
+	// downloadMaxRetries: tentativi aggiuntivi su HTTP 429 (rate limit CDN),
+	// con backoff esponenziale (1s, 2s, 4s, 8s). Verificato in sessione: uno
+	// scan di ~2800 foto di seguito ha fatto scattare 429 sulla stragrande
+	// maggioranza dei download — throttle+retry sono necessari, non opzionali.
+	downloadMaxRetries = 4
+)
+
+// sleepFunc è iniettabile nei test per non rallentarli con gli sleep veri.
+var sleepFunc = time.Sleep
+
 func curlDownload(rawURL string) (body []byte, statusCode int, err error) {
+	for attempt := 0; ; attempt++ {
+		sleepFunc(downloadThrottle)
+		body, statusCode, err = curlDownloadOnce(rawURL)
+		if err != nil || statusCode != http.StatusTooManyRequests || attempt >= downloadMaxRetries {
+			return body, statusCode, err
+		}
+		sleepFunc(time.Duration(1<<uint(attempt)) * time.Second)
+	}
+}
+
+func curlDownloadOnce(rawURL string) (body []byte, statusCode int, err error) {
 	cmd := exec.Command("curl", "-sS", "-w", "\n%{http_code}", rawURL)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
