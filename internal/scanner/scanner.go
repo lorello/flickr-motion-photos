@@ -11,6 +11,7 @@ package scanner
 import (
 	"errors"
 	"fmt"
+	"html"
 	"net/url"
 	"strconv"
 	"strings"
@@ -52,7 +53,7 @@ const statusTagPrefix = "flickrmp:status="
 // owner's original caption (if any) for display on the viewer page — showing
 // our own "watch the video" sentence back on the very page that IS the video
 // would be circular.
-const motionPhotoSentencePrefix = "This is a Motion Photo — watch the video: "
+const motionPhotoSentencePrefix = "This is a Motion Photo — "
 
 // StripOwnSentence returns desc with our own appended sentence (and the
 // blank line before it) removed, leaving only the photo owner's original
@@ -209,7 +210,7 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		return "", err
 	}
 
-	html, err := sitegen.RenderPhotoPage(template, sitegen.PageData{
+	pageHTML, err := sitegen.RenderPhotoPage(template, sitegen.PageData{
 		PhotoID:          photo.ID,
 		Title:            photo.Title,
 		ImageURL:         imageURL,
@@ -240,14 +241,14 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		return "", err
 	}
 
-	viewerURL, err := publisher.PublishPage(photo.ID, html)
+	viewerURL, err := publisher.PublishPage(photo.ID, pageHTML)
 	if err != nil {
 		return "", err
 	}
 
 	if !strings.Contains(currentDescription, viewerURL) {
 		descriptionLinkURL := viewerURL + "?utm_source=flickr&utm_medium=description&utm_campaign=motion_photo&utm_content=" + url.QueryEscape(username)
-		sentence := "This is a Motion Photo — watch the video: " + descriptionLinkURL
+		sentence := motionPhotoSentencePrefix + `<a href="` + html.EscapeString(descriptionLinkURL) + `" rel="noreferrer nofollow">watch the video</a>`
 		newDescription := strings.TrimSpace(currentDescription + "\n\n" + sentence)
 		if err := writer.SetDescription(photo.ID, newDescription); err != nil {
 			return "", err
