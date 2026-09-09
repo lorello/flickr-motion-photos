@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"motionphotos/internal/dotenv"
@@ -28,6 +29,8 @@ func main() {
 	cacheDir := flag.String("cache-dir", os.TempDir(), "Local state cache directory")
 	repoRoot := flag.String("repo-root", ".", "Repository root containing site/template.html")
 	photosetID := flag.String("photoset-id", "", "If set, scan only this album instead of the whole photostream")
+	photoIDs := flag.String("photo-ids", "", "Comma-separated list of specific Flickr photo IDs to process, instead of scanning the whole photostream/photoset")
+	force := flag.Bool("force", false, "With --photo-ids: clear the flickrmp:status Flickr tag and the local cache entry first, forcing reprocessing even if already published/checked/lost")
 	dryRun := flag.Bool("dry-run", false, "Simulate Flickr description/tag writes instead of writing for real")
 	flag.Parse()
 
@@ -106,6 +109,54 @@ func main() {
 
 	if plausibleKey, plausibleSite := os.Getenv("PLAUSIBLE_API_KEY"), os.Getenv("PLAUSIBLE_SITE_ID"); plausibleKey != "" && plausibleSite != "" {
 		scanner.EnablePlausible(plausibleKey, plausibleSite)
+	}
+
+	if *photoIDs != "" {
+		processed := 0
+		for _, id := range strings.Split(*photoIDs, ",") {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			if *limit >= 0 && processed >= *limit {
+				break
+			}
+
+			if *force {
+				// alreadyTagged() in the scanner blocks on ANY
+				// flickrmp:status=* tag, and Store.Get on any cached
+				// Record (other than "ready-private") does too — both
+				// have to go for a targeted photo to actually rerun.
+				if photo, err := client.GetPhoto(id); err == nil {
+					for _, tag := range photo.Tags {
+						if strings.HasPrefix(tag, "flickrmp:status=") {
+							if tagID, err := client.FindTagID(id, tag); err == nil {
+								if err := client.RemoveTag(id, tagID); err != nil {
+									fmt.Fprintln(os.Stderr, "warning: failed to remove status tag on", id, err)
+								}
+							}
+						}
+					}
+				}
+				if err := store.Delete(id); err != nil {
+					fmt.Fprintln(os.Stderr, "warning: failed to clear cache entry for", id, err)
+				}
+			}
+
+			photo, err := client.GetPhoto(id)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "error fetching photo", id, err)
+				continue
+			}
+			status, viewerURL, err := scanner.ProcessPhoto(client, writer, uploader, publisher, store, string(templateBytes), *username, photo)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "error:", err)
+				os.Exit(1)
+			}
+			fmt.Printf("%s\t%s\t%s\t%s\t%s\n", time.Now().Format("15:04:05"), photo.ID, status, photo.Title, viewerURL)
+			processed++
+		}
+		return
 	}
 
 	if *photosetID != "" {

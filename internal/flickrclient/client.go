@@ -629,6 +629,31 @@ func (c *Client) GetPhotosetPhotos(photosetID string, page, perPage int) ([]Phot
 	return parsePhotoList(photosetObj), nil
 }
 
+// GetPhoto fetches a single photo's ID/Title/Tags directly via getInfo,
+// instead of from a paginated listing — used by tools that target one or
+// a handful of specific photo IDs (e.g. cmd/scanner's --photo-ids) rather
+// than scanning the whole photostream.
+func (c *Client) GetPhoto(photoID string) (Photo, error) {
+	info, err := c.getPhotoInfo(photoID)
+	if err != nil {
+		return Photo{}, err
+	}
+	titleObj, _ := info["title"].(map[string]interface{})
+	title, _ := titleObj["_content"].(string)
+
+	tagsObj, _ := info["tags"].(map[string]interface{})
+	rawList, _ := tagsObj["tag"].([]interface{})
+	tags := make([]string, 0, len(rawList))
+	for _, item := range rawList {
+		t, _ := item.(map[string]interface{})
+		if raw, ok := t["raw"].(string); ok {
+			tags = append(tags, raw)
+		}
+	}
+
+	return Photo{ID: photoID, Title: title, Tags: tags}, nil
+}
+
 func parsePhotoList(container map[string]interface{}) []Photo {
 	rawList, _ := container["photo"].([]interface{})
 	photos := make([]Photo, 0, len(rawList))

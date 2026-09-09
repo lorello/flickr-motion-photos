@@ -786,3 +786,29 @@ func TestCallPacesConsecutiveCallsToApiCallMinInterval(t *testing.T) {
 		t.Fatalf("expected the second call back-to-back to wait ~%v, got %v", apiCallMinInterval, slept)
 	}
 }
+
+func TestGetPhotoExtractsTitleAndRawTags(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat": "ok",
+			"photo": map[string]interface{}{
+				"title": map[string]interface{}{"_content": "PXL_1.MP"},
+				"tags": map[string]interface{}{
+					"tag": []interface{}{
+						map[string]interface{}{"raw": "flickrmp:status=published", "_content": "flickrmpstatuspublished"},
+						map[string]interface{}{"raw": "vacation", "_content": "vacation"},
+					},
+				},
+			},
+		}), nil
+	})
+	client := makeClient()
+	photo, err := client.GetPhoto("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := Photo{ID: "999", Title: "PXL_1.MP", Tags: []string{"flickrmp:status=published", "vacation"}}
+	if !reflect.DeepEqual(photo, want) {
+		t.Fatalf("got %+v, want %+v", photo, want)
+	}
+}
