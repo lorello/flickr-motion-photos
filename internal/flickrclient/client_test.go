@@ -672,3 +672,75 @@ func TestIsFullyPrivateFalseWhenFriendsOrFamily(t *testing.T) {
 		}
 	}
 }
+
+func TestGetPhotoInfoCachesRepeatedCallsForSamePhoto(t *testing.T) {
+	calls := 0
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		calls++
+		return jsonBody(map[string]interface{}{
+			"stat":  "ok",
+			"photo": map[string]interface{}{"server": "65535", "id": "999", "secret": "abc"},
+		}), nil
+	})
+	client := makeClient()
+	if _, err := client.GetPhotoDisplayURL("999"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := client.IsFullyPrivate("999"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := client.GetPhotoDescription("999"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected 1 real getInfo call for 3 reads of the same photo, got %d", calls)
+	}
+}
+
+func TestGetPhotoInfoDoesNotCacheAcrossDifferentPhotos(t *testing.T) {
+	calls := 0
+	withUnsignedGet(t, func(_ string, params map[string]string) (string, error) {
+		calls++
+		return jsonBody(map[string]interface{}{
+			"stat":  "ok",
+			"photo": map[string]interface{}{"server": "65535", "id": params["photo_id"], "secret": "abc"},
+		}), nil
+	})
+	client := makeClient()
+	if _, err := client.GetPhotoDisplayURL("111"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := client.GetPhotoDisplayURL("222"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected 2 real getInfo calls for 2 different photos, got %d", calls)
+	}
+}
+
+func TestAddTagInvalidatesPhotoInfoCache(t *testing.T) {
+	calls := 0
+	withUnsignedGet(t, func(_ string, params map[string]string) (string, error) {
+		if params["method"] == "flickr.photos.addTags" {
+			return jsonBody(map[string]interface{}{"stat": "ok"}), nil
+		}
+		calls++
+		return jsonBody(map[string]interface{}{
+			"stat":  "ok",
+			"photo": map[string]interface{}{"server": "65535", "id": "999", "secret": "abc"},
+		}), nil
+	})
+	client := makeClient()
+	if _, err := client.GetPhotoDisplayURL("999"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := client.AddTag("999", "flickrmp:status=published"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := client.GetPhotoDisplayURL("999"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected getInfo to be re-fetched after AddTag, got %d real calls", calls)
+	}
+}

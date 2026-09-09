@@ -209,10 +209,32 @@ type Client struct {
 	ConsumerSecret    string
 	AccessToken       string
 	AccessTokenSecret string
+
+	photoInfoMu    sync.Mutex
+	photoInfoCache map[string]photoInfoCacheEntry
+}
+
+// photoInfoCacheTTL bounds how long a cached getInfo response is reused.
+// Short on purpose: it only needs to collapse the handful of getPhotoInfo
+// calls ProcessPhoto/finishPublish make seconds apart for the SAME photo
+// (originalURL, IsFullyPrivate, displayURL, details, description, the
+// title-preserving read inside SetDescription) into one real API call —
+// it's not meant to serve stale data across a later, separate run.
+const photoInfoCacheTTL = 5 * time.Minute
+
+type photoInfoCacheEntry struct {
+	info      map[string]interface{}
+	fetchedAt time.Time
 }
 
 func NewClient(consumerKey, consumerSecret, accessToken, accessTokenSecret string) *Client {
-	return &Client{consumerKey, consumerSecret, accessToken, accessTokenSecret}
+	return &Client{
+		ConsumerKey:       consumerKey,
+		ConsumerSecret:    consumerSecret,
+		AccessToken:       accessToken,
+		AccessTokenSecret: accessTokenSecret,
+		photoInfoCache:    make(map[string]photoInfoCacheEntry),
+	}
 }
 
 // Authenticated indica se il client ha un access token OAuth (quindi puo'
@@ -265,12 +287,33 @@ func (c *Client) Call(method string, params map[string]string) (map[string]inter
 }
 
 func (c *Client) getPhotoInfo(photoID string) (map[string]interface{}, error) {
+	c.photoInfoMu.Lock()
+	if entry, ok := c.photoInfoCache[photoID]; ok && time.Since(entry.fetchedAt) < photoInfoCacheTTL {
+		c.photoInfoMu.Unlock()
+		return entry.info, nil
+	}
+	c.photoInfoMu.Unlock()
+
 	result, err := c.Call("flickr.photos.getInfo", map[string]string{"photo_id": photoID})
 	if err != nil {
 		return nil, err
 	}
 	photo, _ := result["photo"].(map[string]interface{})
+
+	c.photoInfoMu.Lock()
+	c.photoInfoCache[photoID] = photoInfoCacheEntry{info: photo, fetchedAt: time.Now()}
+	c.photoInfoMu.Unlock()
+
 	return photo, nil
+}
+
+// invalidatePhotoInfo drops the cached getInfo response for photoID —
+// called after a write (SetDescription, AddTag) so a later read within the
+// same run can't return pre-write data instead of a fresh one.
+func (c *Client) invalidatePhotoInfo(photoID string) {
+	c.photoInfoMu.Lock()
+	delete(c.photoInfoCache, photoID)
+	c.photoInfoMu.Unlock()
 }
 
 // IsFullyPrivate reports whether photoID is visible to no one but the
@@ -657,6 +700,7 @@ func (c *Client) SetDescription(photoID, description string) error {
 		"title":       title,
 		"description": description,
 	})
+	c.invalidatePhotoInfo(photoID)
 	return err
 }
 
@@ -665,6 +709,7 @@ func (c *Client) AddTag(photoID, tag string) error {
 		"photo_id": photoID,
 		"tags":     "\"" + tag + "\"",
 	})
+	c.invalidatePhotoInfo(photoID)
 	return err
 }
 
@@ -697,5 +742,6 @@ func (c *Client) RemoveTag(photoID, tagID string) error {
 		"photo_id": photoID,
 		"tag_id":   tagID,
 	})
+	c.invalidatePhotoInfo(photoID)
 	return err
 }
