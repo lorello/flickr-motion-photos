@@ -26,6 +26,11 @@ type Record struct {
 	// quando diventerà pubblica non serve riscaricare l'originale da
 	// Flickr (costoso, soggetto a rate limit) per finire la pubblicazione.
 	VideoURL string `json:"video_url,omitempty"`
+	// Token è la chiave R2 casuale (non l'ID Flickr, indovinabile) usata
+	// per il video e la pagina di questa foto — generato una sola volta e
+	// riusato da ogni run successivo (incluso cmd/republish) così il link
+	// già condiviso in descrizione non cambia mai.
+	Token string `json:"token,omitempty"`
 }
 
 // Store è l'interfaccia consumata dallo scanner: get/set per photo ID.
@@ -84,17 +89,19 @@ func (s *FileStore) Path() string {
 	return s.path
 }
 
-// PhotoIDsByStatus ritorna gli ID delle foto in cache con lo status dato
-// (es. "published"), per strumenti di manutenzione (es. cmd/republish) che
-// devono rielaborare tutte le foto già pubblicate senza rifare la scansione.
-func (s *FileStore) PhotoIDsByStatus(status string) []string {
+// RecordsByStatus ritorna, indicizzati per photo ID, i record in cache con
+// lo status dato (es. "published"), per strumenti di manutenzione (es.
+// cmd/republish) che devono rielaborare tutte le foto già pubblicate senza
+// rifare la scansione — serve l'intero Record (non solo l'ID) per poter
+// riusare lo stesso Token già assegnato, invece di generarne uno nuovo.
+func (s *FileStore) RecordsByStatus(status string) map[string]Record {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ids := make([]string, 0, len(s.data))
+	out := make(map[string]Record)
 	for id, r := range s.data {
 		if r.Status == status {
-			ids = append(ids, id)
+			out[id] = r
 		}
 	}
-	return ids
+	return out
 }

@@ -631,3 +631,44 @@ func TestRemoveTagCallsRemoveTagWithTagID(t *testing.T) {
 		t.Fatalf("unexpected tag_id: %s", capturedParams["tag_id"])
 	}
 }
+
+func TestIsFullyPrivateTrueWhenNoVisibilityFlagsSet(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat":  "ok",
+			"photo": map[string]interface{}{"visibility": map[string]interface{}{"ispublic": 0, "isfriend": 0, "isfamily": 0}},
+		}), nil
+	})
+	client := makeClient()
+	private, err := client.IsFullyPrivate("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !private {
+		t.Fatal("expected fully private")
+	}
+}
+
+func TestIsFullyPrivateFalseWhenFriendsOrFamily(t *testing.T) {
+	cases := []map[string]interface{}{
+		{"ispublic": 1, "isfriend": 0, "isfamily": 0},
+		{"ispublic": 0, "isfriend": 1, "isfamily": 0},
+		{"ispublic": 0, "isfriend": 0, "isfamily": 1},
+	}
+	for _, visibility := range cases {
+		withUnsignedGet(t, func(string, map[string]string) (string, error) {
+			return jsonBody(map[string]interface{}{
+				"stat":  "ok",
+				"photo": map[string]interface{}{"visibility": visibility},
+			}), nil
+		})
+		client := makeClient()
+		private, err := client.IsFullyPrivate("999")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if private {
+			t.Fatalf("expected NOT fully private for visibility %+v", visibility)
+		}
+	}
+}

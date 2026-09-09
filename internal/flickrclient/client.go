@@ -273,18 +273,24 @@ func (c *Client) getPhotoInfo(photoID string) (map[string]interface{}, error) {
 	return photo, nil
 }
 
-// GetPhotoVisibility reports whether photoID is currently public. Used to
-// defer publishing a viewer page/description link for a motion photo that
-// is still private — the page would otherwise be reachable without auth
-// on the public R2 bucket even though the source photo isn't public yet.
-func (c *Client) GetPhotoVisibility(photoID string) (bool, error) {
+// IsFullyPrivate reports whether photoID is visible to no one but the
+// owner (public=0, friend=0, family=0). Used to defer publishing a viewer
+// page/description link — the page/video sit on a public R2 bucket with
+// no auth of their own, so a fully-private photo must stay unpublished.
+// A friends/family-only photo IS published (under an unguessable token
+// URL, not the Flickr photo ID): whoever can already see the photo's
+// description on Flickr has the link, same trust boundary Flickr itself
+// already drew for that photo.
+func (c *Client) IsFullyPrivate(photoID string) (bool, error) {
 	info, err := c.getPhotoInfo(photoID)
 	if err != nil {
 		return false, err
 	}
 	visibility, _ := info["visibility"].(map[string]interface{})
 	isPublic, _ := visibility["ispublic"].(float64)
-	return isPublic == 1, nil
+	isFriend, _ := visibility["isfriend"].(float64)
+	isFamily, _ := visibility["isfamily"].(float64)
+	return isPublic == 0 && isFriend == 0 && isFamily == 0, nil
 }
 
 // PhotoDetails carries the extra display metadata the viewer page uses,
@@ -517,8 +523,8 @@ func (c *Client) FindUserIDByUsername(username string) (string, error) {
 // GetPhotosPage restituisce le foto dell'utente. Quando autenticati come
 // owner questo include anche le private (una chiamata anonima vede solo le
 // pubbliche per definizione) — lo scanner le rileva ed estrae comunque il
-// video, ma rimanda la pubblicazione della pagina finché non diventano
-// pubbliche (vedi ProcessPhoto/GetPhotoVisibility).
+// video, ma rimanda la pubblicazione della pagina finché non sono almeno
+// friends/family (vedi ProcessPhoto/IsFullyPrivate).
 func (c *Client) GetPhotosPage(userID string, page, perPage int) ([]Photo, error) {
 	params := map[string]string{
 		"user_id":  userID,

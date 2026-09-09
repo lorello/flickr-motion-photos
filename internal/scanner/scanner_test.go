@@ -44,8 +44,8 @@ func (f *fakeReader) GetPhotoGeo(photoID string) (string, string, bool, error) {
 }
 func (f *fakeReader) GetPhotoGroups(photoID string) ([]string, error) { return nil, nil }
 func (f *fakeReader) GetPhotoPeople(photoID string) ([]string, error) { return nil, nil }
-func (f *fakeReader) GetPhotoVisibility(photoID string) (bool, error) {
-	return !f.private, f.visibilityErr
+func (f *fakeReader) IsFullyPrivate(photoID string) (bool, error) {
+	return f.private, f.visibilityErr
 }
 
 type fakeWriter struct {
@@ -74,6 +74,15 @@ type fakePublisher struct{ called bool }
 func (f *fakePublisher) PublishPage(photoID, html string) (string, error) {
 	f.called = true
 	return "https://viewer.example.com/p/" + photoID + ".html", nil
+}
+
+// withFixedToken makes generateTokenFunc return a fixed value, so tests
+// can assert on exact video/page URLs instead of a random token.
+func withFixedToken(t *testing.T, token string) {
+	t.Helper()
+	orig := generateTokenFunc
+	generateTokenFunc = func() (string, error) { return token, nil }
+	t.Cleanup(func() { generateTokenFunc = orig })
 }
 
 func newFakeStore(t *testing.T) statestore.Store {
@@ -177,6 +186,7 @@ func TestProcessPhotoPublishedFullFlowSimulated(t *testing.T) {
 		return motiondetect.Result{IsMotion: true, VideoBytes: []byte("VIDEO"), Reason: "published"}
 	}
 	t.Cleanup(func() { detectMotionPhotoFunc = orig })
+	withFixedToken(t, "tok5")
 
 	reader := &fakeReader{originalBytes: []byte("JPEGDATA"), description: "Descrizione originale", displayURL: "https://live.staticflickr.com/x/5_secret_b.jpg"}
 	writer := &fakeWriter{}
@@ -192,7 +202,7 @@ func TestProcessPhotoPublishedFullFlowSimulated(t *testing.T) {
 	if status != "published" {
 		t.Fatalf("got %s", status)
 	}
-	if viewerURL != "https://viewer.example.com/p/5.html" {
+	if viewerURL != "https://viewer.example.com/p/tok5.html" {
 		t.Fatalf("unexpected viewerURL: %s", viewerURL)
 	}
 	if !uploader.called {
@@ -218,6 +228,7 @@ func TestProcessPhotoMotionButPrivateDefersPublishing(t *testing.T) {
 		return motiondetect.Result{IsMotion: true, VideoBytes: []byte("VIDEO"), Reason: "published"}
 	}
 	t.Cleanup(func() { detectMotionPhotoFunc = orig })
+	withFixedToken(t, "tok7")
 
 	reader := &fakeReader{originalBytes: []byte("JPEGDATA"), private: true}
 	writer := &fakeWriter{}
@@ -246,8 +257,8 @@ func TestProcessPhotoMotionButPrivateDefersPublishing(t *testing.T) {
 		t.Fatal("expected no Flickr writes while private")
 	}
 	r, ok := store.Get("7")
-	if !ok || r.Status != "ready-private" || r.VideoURL != "https://videos.example.com/7.mp4" {
-		t.Fatalf("expected ready-private cache entry with VideoURL, got %+v (ok=%v)", r, ok)
+	if !ok || r.Status != "ready-private" || r.VideoURL != "https://videos.example.com/tok7.mp4" || r.Token != "tok7" {
+		t.Fatalf("expected ready-private cache entry with VideoURL/Token, got %+v (ok=%v)", r, ok)
 	}
 }
 
@@ -284,7 +295,7 @@ func TestProcessPhotoReadyPrivateNowPublicFinishesPublishing(t *testing.T) {
 	uploader := &fakeUploader{}
 	publisher := &fakePublisher{}
 	store := newFakeStore(t)
-	store.Set("9", statestore.Record{Status: "ready-private", VideoURL: "https://videos.example.com/9.mp4"})
+	store.Set("9", statestore.Record{Status: "ready-private", VideoURL: "https://videos.example.com/tok9.mp4", Token: "tok9"})
 	photo := flickrclient.Photo{ID: "9", Title: "PXL_9.MP"}
 
 	status, viewerURL, err := ProcessPhoto(reader, writer, uploader, publisher, store, testTemplate, testUsername, photo)
@@ -294,7 +305,7 @@ func TestProcessPhotoReadyPrivateNowPublicFinishesPublishing(t *testing.T) {
 	if status != "published" {
 		t.Fatalf("got %s", status)
 	}
-	if viewerURL != "https://viewer.example.com/p/9.html" {
+	if viewerURL != "https://viewer.example.com/p/tok9.html" {
 		t.Fatalf("unexpected viewerURL: %s", viewerURL)
 	}
 	if uploader.called {
@@ -317,10 +328,11 @@ func TestProcessPhotoIdempotentSkipsDescriptionIfLinkAlreadyPresent(t *testing.T
 		return motiondetect.Result{IsMotion: true, VideoBytes: []byte("VIDEO"), Reason: "published"}
 	}
 	t.Cleanup(func() { detectMotionPhotoFunc = orig })
+	withFixedToken(t, "tok6")
 
 	reader := &fakeReader{
 		originalBytes: []byte("JPEGDATA"),
-		description:   "This is a Motion Photo — watch the video: https://viewer.example.com/p/6.html",
+		description:   "This is a Motion Photo — watch the video: https://viewer.example.com/p/tok6.html",
 		displayURL:    "https://live.staticflickr.com/x/6_secret_b.jpg",
 	}
 	writer := &fakeWriter{}

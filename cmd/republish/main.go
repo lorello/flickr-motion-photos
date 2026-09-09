@@ -85,10 +85,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	photoIDs := store.PhotoIDsByStatus("published")
-	fmt.Fprintf(os.Stderr, "[INFO] republishing %d photo(s)\n", len(photoIDs))
+	records := store.RecordsByStatus("published")
+	fmt.Fprintf(os.Stderr, "[INFO] republishing %d photo(s)\n", len(records))
 
-	for _, photoID := range photoIDs {
+	for photoID, rec := range records {
+		// key is the public R2 key (a random token for photos processed
+		// after the token feature landed; falls back to the plain photo
+		// ID for older cache entries that predate it, so their already-
+		// shared link keeps working).
+		key := rec.Token
+		if key == "" {
+			key = photoID
+		}
+
 		result, err := client.Call("flickr.photos.getInfo", map[string]string{"photo_id": photoID})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "FAIL getInfo", photoID, err)
@@ -118,7 +127,7 @@ func main() {
 			mapEmbedURL, _ = scanner.BuildMapEmbedURL(lat, lon)
 		}
 
-		videoURL := r2PublicBaseURL + "/" + photoID + ".mp4"
+		videoURL := r2PublicBaseURL + "/" + key + ".mp4"
 
 		currentDescription, err := client.GetPhotoDescription(photoID)
 		if err != nil {
@@ -128,7 +137,7 @@ func main() {
 
 		var pageViews string
 		if plausibleKey != "" && plausibleSite != "" {
-			path := fmt.Sprintf("/photos/%s/%s.html", *username, photoID)
+			path := fmt.Sprintf("/photos/%s/%s.html", *username, key)
 			if _, views, pvErr := plausible.GetPageViews(plausibleKey, plausibleSite, path); pvErr == nil {
 				pageViews = fmt.Sprintf("%d", views)
 			}
@@ -165,7 +174,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "FAIL render", photoID, err)
 			continue
 		}
-		url, err := publisher.PublishPage(photoID, html)
+		url, err := publisher.PublishPage(key, html)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "FAIL publish", photoID, err)
 			continue

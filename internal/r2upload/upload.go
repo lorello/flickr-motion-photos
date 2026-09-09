@@ -51,27 +51,31 @@ func PutObject(ctx context.Context, client PutObjectAPI, bucket, publicBaseURL, 
 }
 
 // VideoUploader/PageUploader adapt PutObject to the scanner's Uploader/
-// Publisher interfaces (see internal/scanner).
+// Publisher interfaces (see internal/scanner). Both just take a key —
+// the scanner passes it a per-photo random token (see
+// scanner.generateToken), not the Flickr photo ID, so the public URL can't
+// be guessed/enumerated; some photos published before that change still
+// use their plain Flickr ID as the key (never migrated, no functional
+// difference for genuinely public photos).
 
-// VideoUploader keeps a flat "<id>.mp4" key deliberately — it's never
-// user-facing (only referenced from inside the generated page's <video
-// src>), and every video already published this session lives at that flat
-// path; adding a username prefix here would silently orphan them all
-// without a bucket copy/migration this project doesn't do.
+// VideoUploader keeps a flat "<key>.mp4" — it's never user-facing (only
+// referenced from inside the generated page's <video src>), and every
+// video already published this session lives at that flat path; adding a
+// username prefix here would silently orphan them all without a bucket
+// copy/migration this project doesn't do.
 type VideoUploader struct {
 	Client        PutObjectAPI
 	Bucket        string
 	PublicBaseURL string
 }
 
-func (u VideoUploader) UploadVideo(photoID string, videoBytes []byte) (string, error) {
-	return PutObject(context.Background(), u.Client, u.Bucket, u.PublicBaseURL, photoID+".mp4", "video/mp4", videoBytes)
+func (u VideoUploader) UploadVideo(key string, videoBytes []byte) (string, error) {
+	return PutObject(context.Background(), u.Client, u.Bucket, u.PublicBaseURL, key+".mp4", "video/mp4", videoBytes)
 }
 
 // PageUploader is user-facing (linked from the Flickr description), so its
-// key mirrors Flickr's own URL scheme (photos/<username>/<id>) — unique
-// today since Flickr photo IDs are globally unique regardless of owner,
-// and organizes the bucket per-user ahead of any future multi-account use.
+// key mirrors Flickr's own URL scheme (photos/<username>/<key>) — this
+// organizes the bucket per-user ahead of any future multi-account use.
 type PageUploader struct {
 	Client        PutObjectAPI
 	Bucket        string
@@ -79,7 +83,7 @@ type PageUploader struct {
 	Username      string
 }
 
-func (p PageUploader) PublishPage(photoID, html string) (string, error) {
-	key := fmt.Sprintf("photos/%s/%s.html", p.Username, photoID)
-	return PutObject(context.Background(), p.Client, p.Bucket, p.PublicBaseURL, key, "text/html; charset=utf-8", []byte(html))
+func (p PageUploader) PublishPage(key, html string) (string, error) {
+	objectKey := fmt.Sprintf("photos/%s/%s.html", p.Username, key)
+	return PutObject(context.Background(), p.Client, p.Bucket, p.PublicBaseURL, objectKey, "text/html; charset=utf-8", []byte(html))
 }
