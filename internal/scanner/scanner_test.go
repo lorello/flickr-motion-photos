@@ -3,6 +3,7 @@ package scanner
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"motionphotos/internal/flickrclient"
@@ -348,5 +349,47 @@ func TestProcessPhotoIdempotentSkipsDescriptionIfLinkAlreadyPresent(t *testing.T
 	}
 	if len(writer.setDescriptionCalls) != 0 {
 		t.Fatal("expected no set_description call, link already present")
+	}
+}
+
+func TestProcessPhotoReplacesStaleOwnSentenceInsteadOfDuplicating(t *testing.T) {
+	orig := detectMotionPhotoFunc
+	detectMotionPhotoFunc = func([]byte) motiondetect.Result {
+		return motiondetect.Result{IsMotion: true, VideoBytes: []byte("VIDEO"), Reason: "published"}
+	}
+	t.Cleanup(func() { detectMotionPhotoFunc = orig })
+	withFixedToken(t, "newtoken")
+
+	reader := &fakeReader{
+		originalBytes: []byte("JPEGDATA"),
+		description:   "Original caption\n\nThis is a Motion Photo — <a href=\"https://viewer.example.com/p/10.html\" rel=\"noreferrer nofollow\">watch the video</a>",
+		displayURL:    "https://live.staticflickr.com/x/10_secret_b.jpg",
+	}
+	writer := &fakeWriter{}
+	store := newFakeStore(t)
+	photo := flickrclient.Photo{ID: "10", Title: "PXL_10.MP"}
+
+	status, viewerURL, err := ProcessPhoto(reader, writer, &fakeUploader{}, &fakePublisher{}, store, testTemplate, testUsername, photo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != "published" {
+		t.Fatalf("got %s", status)
+	}
+	if viewerURL != "https://viewer.example.com/p/newtoken.html" {
+		t.Fatalf("unexpected viewerURL: %s", viewerURL)
+	}
+	if len(writer.setDescriptionCalls) != 1 {
+		t.Fatalf("expected 1 set_description call, got %d", len(writer.setDescriptionCalls))
+	}
+	newDescription := writer.setDescriptionCalls[0]
+	if strings.Count(newDescription, "This is a Motion Photo") != 1 {
+		t.Fatalf("expected exactly one sentence, got description: %q", newDescription)
+	}
+	if strings.Contains(newDescription, "p/10.html") {
+		t.Fatalf("expected the stale old link to be gone, got description: %q", newDescription)
+	}
+	if !strings.HasPrefix(newDescription, "Original caption") {
+		t.Fatalf("expected the original caption to be preserved, got description: %q", newDescription)
 	}
 }

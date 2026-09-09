@@ -320,7 +320,17 @@ func finishPublish(reader Reader, writer Writer, publisher Publisher, store stat
 	if !strings.Contains(currentDescription, viewerURL) {
 		descriptionLinkURL := viewerURL + "?utm_source=flickr&utm_medium=description&utm_campaign=motion_photo&utm_content=" + url.QueryEscape(username)
 		sentence := motionPhotoSentencePrefix + `<a href="` + html.EscapeString(descriptionLinkURL) + `" rel="noreferrer nofollow">watch the video</a>`
-		newDescription := strings.TrimSpace(currentDescription + "\n\n" + sentence)
+		// StripOwnSentence first: currentDescription may already carry an
+		// older version of our own sentence (a previous link that's now
+		// stale/dead, e.g. a reprocessed orphaned-video photo) — without
+		// this, appending blindly leaves both the dead old sentence and
+		// the new one in the description.
+		originalCaption := StripOwnSentence(currentDescription)
+		newDescription := strings.TrimSpace(originalCaption)
+		if newDescription != "" {
+			newDescription += "\n\n"
+		}
+		newDescription += sentence
 		if err := writer.SetDescription(photo.ID, newDescription); err != nil {
 			return "", "", err
 		}
