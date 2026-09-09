@@ -3,10 +3,22 @@ package flickrclient
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"reflect"
 	"testing"
 	"time"
 )
+
+// TestMain makes sleepFunc a no-op by default for the whole package's test
+// run — without it, every Call() paces itself via restCallPacer using the
+// real time.Sleep, and the many tests here that call Call() repeatedly
+// turn into a 40+ second suite for no reason. Tests that need to verify
+// an actual sleep duration override sleepFunc themselves (existing
+// pattern, e.g. the cdnCooldown tests) and restore it via t.Cleanup.
+func TestMain(m *testing.M) {
+	sleepFunc = func(time.Duration) {}
+	os.Exit(m.Run())
+}
 
 func makeClient() *Client {
 	return NewClient("ck", "cs", "", "")
@@ -742,5 +754,35 @@ func TestAddTagInvalidatesPhotoInfoCache(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("expected getInfo to be re-fetched after AddTag, got %d real calls", calls)
+	}
+}
+
+func TestCallPacesConsecutiveCallsToApiCallMinInterval(t *testing.T) {
+	origLastCall := restCallPacer.lastCall
+	restCallPacer.lastCall = time.Time{}
+	t.Cleanup(func() { restCallPacer.lastCall = origLastCall })
+
+	var slept time.Duration
+	origSleep := sleepFunc
+	sleepFunc = func(d time.Duration) { slept += d }
+	t.Cleanup(func() { sleepFunc = origSleep })
+
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{"stat": "ok"}), nil
+	})
+	client := makeClient()
+
+	if _, err := client.Call("flickr.test.echo", nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if slept != 0 {
+		t.Fatalf("expected no wait on the first call, got %v", slept)
+	}
+
+	if _, err := client.Call("flickr.test.echo", nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if slept < apiCallMinInterval-10*time.Millisecond {
+		t.Fatalf("expected the second call back-to-back to wait ~%v, got %v", apiCallMinInterval, slept)
 	}
 }

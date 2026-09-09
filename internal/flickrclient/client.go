@@ -130,6 +130,34 @@ func (c *cdnCooldown) recordSuccess() {
 	c.nextBackoff = time.Minute
 }
 
+// apiCallMinInterval paces REST calls to api.flickr.com at ~3000/hour —
+// under Flickr's documented 3600/hour per-key ceiling, leaving headroom
+// for calls made outside this process (cmd/authorize, manual curl,
+// cmd/republish running at the same time). Self-imposed rather than
+// reactive like cdnCooldown: Flickr's docs say an abusive key gets
+// disabled, not warned first with a visible 429 — waiting to see one
+// before slowing down would already be too late.
+const apiCallMinInterval = time.Hour / 3000
+
+// apiCallPacer enforces apiCallMinInterval between REST calls, process-wide
+// (not per Client instance) — the 3600/hour ceiling is per API key, and
+// the key is shared across however many Client values exist.
+type apiCallPacer struct {
+	mu       sync.Mutex
+	lastCall time.Time
+}
+
+func (p *apiCallPacer) wait() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if wait := apiCallMinInterval - time.Since(p.lastCall); wait > 0 {
+		sleepFunc(wait)
+	}
+	p.lastCall = time.Now()
+}
+
+var restCallPacer = &apiCallPacer{}
+
 func curlDownload(rawURL string) (body []byte, statusCode int, err error) {
 	downloadCooldown.waitIfBlocked()
 	sleepFunc(downloadThrottle)
@@ -244,6 +272,8 @@ func (c *Client) Authenticated() bool {
 }
 
 func (c *Client) Call(method string, params map[string]string) (map[string]interface{}, error) {
+	restCallPacer.wait()
+
 	var body string
 	var err error
 
