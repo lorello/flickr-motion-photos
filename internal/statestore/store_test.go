@@ -84,3 +84,38 @@ func TestRecordsByStatusFiltersCorrectlyAndKeepsToken(t *testing.T) {
 		t.Fatalf("unexpected tokens: %+v", records)
 	}
 }
+
+func TestDeleteRemovesEntryAndPersists(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir, "user")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	store.Set("1", Record{Status: "published"})
+
+	if err := store.Delete("1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := store.Get("1"); ok {
+		t.Fatal("expected record to be gone after Delete")
+	}
+
+	reopened, err := NewFileStore(dir, "user")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := reopened.Get("1"); ok {
+		t.Fatal("expected deletion to persist across reopen")
+	}
+}
+
+func TestDeleteOfUnknownIDIsNoOp(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir, "user")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := store.Delete("nonexistent"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

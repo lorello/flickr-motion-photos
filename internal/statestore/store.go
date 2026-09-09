@@ -38,6 +38,12 @@ type Record struct {
 type Store interface {
 	Get(photoID string) (Record, bool)
 	Set(photoID string, r Record) error
+	// Delete rimuove la voce di photoID, se presente (no-op altrimenti) —
+	// usato per far rielaborare da capo una foto (es. video orfano su R2:
+	// il tag Flickr viene rimosso e la cache locale deve seguirlo, non
+	// basta sovrascrivere lo status: qualunque Record esistente, tranne
+	// "ready-private", fa scattare "skipped(cache)" in ProcessPhoto).
+	Delete(photoID string) error
 }
 
 // FileStore è l'implementazione attuale: un file JSON in /tmp, con nome
@@ -77,6 +83,20 @@ func (s *FileStore) Set(photoID string, r Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.data[photoID] = r
+	raw, err := json.MarshalIndent(s.data, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.path, raw, 0o644)
+}
+
+func (s *FileStore) Delete(photoID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.data[photoID]; !ok {
+		return nil
+	}
+	delete(s.data, photoID)
 	raw, err := json.MarshalIndent(s.data, "", "  ")
 	if err != nil {
 		return err
