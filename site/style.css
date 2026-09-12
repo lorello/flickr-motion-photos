@@ -290,6 +290,9 @@ h2 {
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
+.albumgrid .item {
+  min-width: 0;
+}
 .albumgrid .item a {
   color: #222;
   text-decoration: none;
