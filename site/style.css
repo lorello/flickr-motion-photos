@@ -133,13 +133,18 @@ main {
   flex-wrap: wrap;
 }
 .col-left {
-  flex: 1 1 480px;
+  flex: 1 1 0;
   min-width: 0;
 }
 .col-right {
-  flex: 1 1 320px;
-  max-width: 380px;
-  min-width: 280px;
+  flex: 0 0 340px;
+  width: 340px;
+}
+@media (max-width: 760px) {
+  .col-right {
+    flex: 1 1 280px;
+    width: auto;
+  }
 }
 .block {
   padding: 16px 0;
@@ -253,7 +258,7 @@ h2 {
 }
 .pillgrid .item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   min-width: 0;
 }
@@ -263,6 +268,10 @@ h2 {
   border-radius: 50%;
   flex: none;
   display: block;
+}
+.pillgrid .item .count {
+  font-size: var(--fs-small);
+  color: #888;
 }
 .pillgrid .item a {
   color: #222;

@@ -105,7 +105,10 @@
             {{range .Groups}}
             <div class="item">
               <img src="{{.IconURL}}" alt="">
-              <a href="{{.URL}}">{{.Title}}</a>
+              <div>
+                <a href="{{.URL}}">{{.Title}}</a>
+                {{if .ItemCount}}<div class="count">{{.ItemCount}} items</div>{{end}}
+              </div>
             </div>
             {{end}}
           </div>
@@ -158,11 +161,11 @@
         <div class="block">
           <h2>Additional Information</h2>
           <table class="infotable">
-            {{if .ContentType}}<tr><th>Content type</th><td>{{.ContentType}}</td></tr>{{end}}
-            {{if .SafetyLevel}}<tr><th>Safety level</th><td>{{.SafetyLevel}}</td></tr>{{end}}
             {{if .ViewPrivacy}}<tr><th>View privacy</th><td>{{.ViewPrivacy}}</td></tr>{{end}}
             {{if .CommentPerm}}<tr><th>Who can comment</th><td>{{.CommentPerm}}</td></tr>{{end}}
             {{if .AddMetaPerm}}<tr><th>Who can add tags/notes/people</th><td>{{.AddMetaPerm}}</td></tr>{{end}}
+            {{if .SafetyLevel}}<tr><th>Safety level</th><td>{{.SafetyLevel}}</td></tr>{{end}}
+            {{if .ContentType}}<tr><th>Content type</th><td>{{.ContentType}}</td></tr>{{end}}
           </table>
         </div>
 

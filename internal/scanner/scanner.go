@@ -277,7 +277,7 @@ func finishPublish(reader Reader, writer Writer, publisher Publisher, store stat
 
 	groups := make([]sitegen.GroupInfo, 0, len(rawGroups))
 	for _, g := range rawGroups {
-		groups = append(groups, sitegen.GroupInfo{Title: g.Title, IconURL: g.IconURL, URL: g.URL})
+		groups = append(groups, sitegen.GroupInfo{Title: g.Title, IconURL: g.IconURL, URL: g.URL, ItemCount: g.ItemCount})
 	}
 	albums := make([]sitegen.AlbumInfo, 0, len(rawAlbums))
 	for _, a := range rawAlbums {

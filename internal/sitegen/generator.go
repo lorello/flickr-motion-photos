@@ -14,9 +14,10 @@ import (
 // mirrors of flickrclient's richer types — kept separate so this package
 // doesn't need to import flickrclient just to render a struct's fields.
 type GroupInfo struct {
-	Title   string
-	IconURL string
-	URL     string
+	Title     string
+	IconURL   string
+	URL       string
+	ItemCount int
 }
 
 type AlbumInfo struct {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -393,7 +394,7 @@ type PhotoDetails struct {
 	LicenseURL     string
 	SafetyLevel    string // "Safe" | "Moderate" | "Restricted"
 	ViewPrivacy    string // "Public" | "Friends" | "Family" | "Friends & Family" | "Only you"
-	CommentPerm    string // who can comment: "Everyone" | "Your contacts" | "Friends and family" | "Only you"
+	CommentPerm    string // who can comment: "Everyone" | "People you follow" | "Friends and family" | "Only you"
 	AddMetaPerm    string // who can add tags/notes/people: same scale as CommentPerm
 }
 
@@ -401,7 +402,7 @@ var safetyLevelNames = map[string]string{"0": "Safe", "1": "Moderate", "2": "Res
 
 // permLevelNames maps flickr.photos.getPerms' permcomment/permaddmeta
 // values to the exact wording Flickr's own privacy UI uses.
-var permLevelNames = map[string]string{"0": "Only you", "1": "Friends and family", "2": "Your contacts", "3": "Everyone"}
+var permLevelNames = map[string]string{"0": "Only you", "1": "Friends and family", "2": "People you follow", "3": "Everyone"}
 
 func viewPrivacyName(visibility map[string]interface{}) string {
 	isPublic, _ := visibility["ispublic"].(float64)
@@ -449,7 +450,7 @@ func (c *Client) GetPhotoDetails(photoID string) (PhotoDetails, error) {
 		if content == "" || strings.HasPrefix(content, "flickrmp:") {
 			continue // internal bookkeeping namespace, not for display
 		}
-		tags = append(tags, content)
+		tags = append(tags, html.UnescapeString(content))
 	}
 
 	views, _ := info["views"].(string)
@@ -548,10 +549,11 @@ func (c *Client) GetPhotoGeo(photoID string) (lat, lon string, hasGeo bool, err 
 
 // Group is a Flickr group pool this photo has been added to.
 type Group struct {
-	ID      string
-	Title   string
-	IconURL string
-	URL     string
+	ID        string
+	Title     string
+	IconURL   string
+	URL       string
+	ItemCount int
 }
 
 // Person is someone tagged in this photo.
@@ -605,13 +607,26 @@ func (c *Client) GetPhotoGroups(photoID string) ([]Group, error) {
 		if title == "" {
 			continue
 		}
+		title = html.UnescapeString(title)
 		iconServer, _ := p["iconserver"].(string)
 		iconFarm, _ := p["iconfarm"].(float64)
+		// "url" is Flickr's own relative path (e.g. "/groups/womanportrait/pool/",
+		// a nicer slug when the group has one, not just the raw NSID) —
+		// preferred over building one from the ID ourselves.
+		groupURL := fmt.Sprintf("https://www.flickr.com/groups/%s/", id)
+		if relURL, _ := p["url"].(string); relURL != "" {
+			groupURL = "https://www.flickr.com" + relURL
+		}
+		itemCount := 0
+		if poolCount, _ := p["pool_count"].(string); poolCount != "" {
+			itemCount, _ = strconv.Atoi(poolCount)
+		}
 		groups = append(groups, Group{
-			ID:      id,
-			Title:   title,
-			IconURL: buddyIconURL(iconServer, iconFarm, id),
-			URL:     fmt.Sprintf("https://www.flickr.com/groups/%s/", id),
+			ID:        id,
+			Title:     title,
+			IconURL:   buddyIconURL(iconServer, iconFarm, id),
+			URL:       groupURL,
+			ItemCount: itemCount,
 		})
 	}
 	return groups, nil
@@ -633,6 +648,7 @@ func (c *Client) GetPhotoAlbums(photoID string) ([]Album, error) {
 		if title == "" {
 			continue
 		}
+		title = html.UnescapeString(title)
 		primary, _ := s["primary"].(string)
 		secret, _ := s["secret"].(string)
 		server, _ := s["server"].(string)
@@ -726,10 +742,10 @@ func (c *Client) GetPhotoComments(photoID string) ([]Comment, error) {
 			}
 		}
 		comments = append(comments, Comment{
-			Author:     authorName,
+			Author:     html.UnescapeString(authorName),
 			IconURL:    buddyIconURL(iconServer, iconFarm, author),
 			ProfileURL: fmt.Sprintf("https://www.flickr.com/photos/%s/", profileSlug),
-			Text:       stripHTMLTags(content),
+			Text:       html.UnescapeString(stripHTMLTags(content)),
 			Date:       date,
 		})
 	}
@@ -861,7 +877,8 @@ func (c *Client) GetPhoto(photoID string) (Photo, error) {
 		return Photo{}, err
 	}
 	titleObj, _ := info["title"].(map[string]interface{})
-	title, _ := titleObj["_content"].(string)
+	rawTitle, _ := titleObj["_content"].(string)
+	title := html.UnescapeString(rawTitle)
 
 	tagsObj, _ := info["tags"].(map[string]interface{})
 	rawList, _ := tagsObj["tag"].([]interface{})
@@ -869,7 +886,7 @@ func (c *Client) GetPhoto(photoID string) (Photo, error) {
 	for _, item := range rawList {
 		t, _ := item.(map[string]interface{})
 		if raw, ok := t["raw"].(string); ok {
-			tags = append(tags, raw)
+			tags = append(tags, html.UnescapeString(raw))
 		}
 	}
 
@@ -899,7 +916,8 @@ func parsePhotoList(container map[string]interface{}) []Photo {
 	for _, item := range rawList {
 		p, _ := item.(map[string]interface{})
 		id, _ := p["id"].(string)
-		title, _ := p["title"].(string)
+		rawTitle, _ := p["title"].(string)
+		title := html.UnescapeString(rawTitle)
 		rawTags, _ := p["tags"].(string)
 		media, _ := p["media"].(string)
 		contentType := contentTypeString(p["content_type"])
@@ -981,7 +999,7 @@ func (c *Client) GetPhotoDescription(photoID string) (string, error) {
 	}
 	desc, _ := info["description"].(map[string]interface{})
 	content, _ := desc["_content"].(string)
-	return content, nil
+	return html.UnescapeString(content), nil
 }
 
 func (c *Client) SetDescription(photoID, description string) error {

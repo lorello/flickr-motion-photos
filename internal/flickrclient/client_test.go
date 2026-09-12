@@ -482,7 +482,7 @@ func TestGetPhotoGroupsExtractsPoolTitles(t *testing.T) {
 		return jsonBody(map[string]interface{}{
 			"stat": "ok",
 			"pool": []interface{}{
-				map[string]interface{}{"id": "111@N01", "title": "Sunsets", "iconserver": "5", "iconfarm": 6.0},
+				map[string]interface{}{"id": "111@N01", "title": "Sunsets", "iconserver": "5", "iconfarm": 6.0, "pool_count": "74045", "url": "/groups/sunsetlovers/pool/"},
 				map[string]interface{}{"id": "222@N01", "title": "Nature"},
 			},
 		}), nil
@@ -501,8 +501,17 @@ func TestGetPhotoGroupsExtractsPoolTitles(t *testing.T) {
 	if groups[1].IconURL != defaultBuddyIconURL {
 		t.Fatalf("expected default icon for group without iconserver, got %s", groups[1].IconURL)
 	}
-	if groups[0].URL != "https://www.flickr.com/groups/111@N01/" {
-		t.Fatalf("unexpected group URL: %s", groups[0].URL)
+	if groups[0].ItemCount != 74045 {
+		t.Fatalf("unexpected item count: %d", groups[0].ItemCount)
+	}
+	if groups[1].ItemCount != 0 {
+		t.Fatalf("expected 0 item count when pool_count absent, got %d", groups[1].ItemCount)
+	}
+	if groups[0].URL != "https://www.flickr.com/groups/sunsetlovers/pool/" {
+		t.Fatalf("expected Flickr's own url field to be used, got %s", groups[0].URL)
+	}
+	if groups[1].URL != "https://www.flickr.com/groups/222@N01/" {
+		t.Fatalf("expected fallback URL built from ID when url field absent, got %s", groups[1].URL)
 	}
 }
 
