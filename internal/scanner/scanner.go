@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"math"
 	"net/url"
 	"strconv"
 	"strings"
@@ -30,10 +31,46 @@ import (
 // shows around the photo's coordinates.
 const mapEmbedDelta = 0.005
 
+// privateGeoZones are places whose exact location shouldn't be published on
+// a public viewer page (home, recurring vacation spot). A photo whose
+// coordinates fall within radiusKM of one of these is treated as "no geo
+// data" for display purposes — the map block is simply omitted.
+var privateGeoZones = []struct {
+	name     string
+	lat, lon float64
+	radiusKM float64
+}{
+	{"home (Vicopisano, Pisa)", 43.7139, 10.6459, 15},
+	{"vacation (Costa Rei)", 39.1800, 9.6360, 20},
+}
+
+// haversineKM returns the great-circle distance between two lat/lon points
+// in kilometers.
+func haversineKM(lat1, lon1, lat2, lon2 float64) float64 {
+	const earthRadiusKM = 6371.0
+	rad := math.Pi / 180
+	dLat := (lat2 - lat1) * rad
+	dLon := (lon2 - lon1) * rad
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(lat1*rad)*math.Cos(lat2*rad)*math.Sin(dLon/2)*math.Sin(dLon/2)
+	return earthRadiusKM * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+}
+
+func isPrivateGeoZone(lat, lon float64) bool {
+	for _, zone := range privateGeoZones {
+		if haversineKM(lat, lon, zone.lat, zone.lon) <= zone.radiusKM {
+			return true
+		}
+	}
+	return false
+}
+
 // BuildMapEmbedURL builds an OpenStreetMap embed URL (no API key needed,
-// unlike Google Maps) centered on lat/lon, with a marker. Returns an error
-// if lat/lon aren't valid floats — callers should treat that as "skip the
-// map", not fail the whole publish.
+// unlike Google Maps) centered on lat/lon, with a marker. Returns "", nil
+// (not an error) when the coordinates fall inside a privateGeoZones entry,
+// so the map is silently omitted rather than exposing home/vacation
+// locations. Returns an error if lat/lon aren't valid floats — callers
+// should treat that as "skip the map", not fail the whole publish.
 func BuildMapEmbedURL(lat, lon string) (string, error) {
 	latF, err := strconv.ParseFloat(lat, 64)
 	if err != nil {
@@ -42,6 +79,9 @@ func BuildMapEmbedURL(lat, lon string) (string, error) {
 	lonF, err := strconv.ParseFloat(lon, 64)
 	if err != nil {
 		return "", err
+	}
+	if isPrivateGeoZone(latF, lonF) {
+		return "", nil
 	}
 	return fmt.Sprintf(
 		"https://www.openstreetmap.org/export/embed.html?bbox=%f,%f,%f,%f&marker=%f,%f",

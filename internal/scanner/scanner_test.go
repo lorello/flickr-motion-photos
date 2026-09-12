@@ -414,3 +414,32 @@ func TestProcessPhotoReplacesStaleOwnSentenceInsteadOfDuplicating(t *testing.T) 
 		t.Fatalf("expected the original caption to be preserved, got description: %q", newDescription)
 	}
 }
+
+func TestBuildMapEmbedURLOmitsMapNearHomeAndVacationSpot(t *testing.T) {
+	cases := []struct {
+		name     string
+		lat, lon string
+	}{
+		{"home", "43.7139", "10.6459"},
+		{"vacation", "39.1800", "9.6360"},
+	}
+	for _, tc := range cases {
+		url, err := BuildMapEmbedURL(tc.lat, tc.lon)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.name, err)
+		}
+		if url != "" {
+			t.Fatalf("%s: expected map to be omitted, got %q", tc.name, url)
+		}
+	}
+}
+
+func TestBuildMapEmbedURLShowsMapElsewhere(t *testing.T) {
+	url, err := BuildMapEmbedURL("45.4642", "9.1900") // Milano
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if url == "" {
+		t.Fatal("expected a map URL for a non-private location")
+	}
+}
