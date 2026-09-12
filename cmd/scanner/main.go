@@ -73,6 +73,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := r2upload.UploadStaticAssets(context.Background(), r2Client, r2Bucket, r2PublicBaseURL, *repoRoot); err != nil {
+		fmt.Fprintln(os.Stderr, "error uploading static assets (style.css/script.js):", err)
+		os.Exit(1)
+	}
+
 	templateBytes, err := os.ReadFile(filepath.Join(*repoRoot, "site", "template.html"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error reading site/template.html:", err)

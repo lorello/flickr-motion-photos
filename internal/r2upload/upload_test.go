@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -72,6 +73,58 @@ func TestPageUploaderUsesUsernamePrefixedKeyAndHTMLContentType(t *testing.T) {
 	}
 	if url != "https://videos.example.com/photos/lorello/999.html" {
 		t.Fatalf("unexpected url: %s", url)
+	}
+}
+
+type recordingPutObjectAPI struct {
+	calls []*s3.PutObjectInput
+}
+
+func (f *recordingPutObjectAPI) PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
+	f.calls = append(f.calls, params)
+	return &s3.PutObjectOutput{}, nil
+}
+
+func TestUploadStaticAssetsUploadsCSSAndJSWithCorrectKeysAndTypes(t *testing.T) {
+	dir := t.TempDir()
+	siteDir := dir + "/site"
+	if err := os.MkdirAll(siteDir, 0o755); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := os.WriteFile(siteDir+"/style.css", []byte("body{color:red}"), 0o644); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := os.WriteFile(siteDir+"/script.js", []byte("console.log(1)"), 0o644); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	fake := &recordingPutObjectAPI{}
+	if err := UploadStaticAssets(context.Background(), fake, "bucket", "https://videos.example.com", dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fake.calls) != 2 {
+		t.Fatalf("expected 2 PutObject calls, got %d", len(fake.calls))
+	}
+
+	byKey := map[string]*s3.PutObjectInput{}
+	for _, call := range fake.calls {
+		byKey[*call.Key] = call
+	}
+
+	css, ok := byKey["style.css"]
+	if !ok {
+		t.Fatal("expected an upload with key style.css")
+	}
+	if *css.ContentType != "text/css; charset=utf-8" {
+		t.Fatalf("unexpected style.css content type: %s", *css.ContentType)
+	}
+
+	js, ok := byKey["script.js"]
+	if !ok {
+		t.Fatal("expected an upload with key script.js")
+	}
+	if *js.ContentType != "application/javascript; charset=utf-8" {
+		t.Fatalf("unexpected script.js content type: %s", *js.ContentType)
 	}
 }
 

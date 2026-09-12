@@ -62,6 +62,11 @@ func main() {
 	}
 	publisher := r2upload.PageUploader{Client: r2Client, Bucket: r2Bucket, PublicBaseURL: r2PublicBaseURL, Username: *username}
 
+	if err := r2upload.UploadStaticAssets(context.Background(), r2Client, r2Bucket, r2PublicBaseURL, *repoRoot); err != nil {
+		fmt.Fprintln(os.Stderr, "error uploading static assets (style.css/script.js):", err)
+		os.Exit(1)
+	}
+
 	plausibleKey, plausibleSite := os.Getenv("PLAUSIBLE_API_KEY"), os.Getenv("PLAUSIBLE_SITE_ID")
 
 	templateBytes, err := os.ReadFile(filepath.Join(*repoRoot, "site", "template.html"))

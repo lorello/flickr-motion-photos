@@ -8,6 +8,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -86,4 +88,31 @@ type PageUploader struct {
 func (p PageUploader) PublishPage(key, html string) (string, error) {
 	objectKey := fmt.Sprintf("photos/%s/%s.html", p.Username, key)
 	return PutObject(context.Background(), p.Client, p.Bucket, p.PublicBaseURL, objectKey, "text/html; charset=utf-8", []byte(html))
+}
+
+// UploadStaticAssets pushes site/style.css and site/script.js to the bucket
+// root ("/style.css", "/script.js") — the CSS/JS every viewer page links to
+// instead of embedding inline, so a page-only change doesn't need every
+// published page re-rendered, and a shared-asset change doesn't need
+// touching the pages at all. Called once per run (cmd/scanner,
+// cmd/republish), cheap: two PutObject calls, not per-photo.
+func UploadStaticAssets(ctx context.Context, client PutObjectAPI, bucket, publicBaseURL, repoRoot string) error {
+	assets := []struct {
+		file        string
+		key         string
+		contentType string
+	}{
+		{"style.css", "style.css", "text/css; charset=utf-8"},
+		{"script.js", "script.js", "application/javascript; charset=utf-8"},
+	}
+	for _, a := range assets {
+		data, err := os.ReadFile(filepath.Join(repoRoot, "site", a.file))
+		if err != nil {
+			return fmt.Errorf("reading %s: %w", a.file, err)
+		}
+		if _, err := PutObject(ctx, client, bucket, publicBaseURL, a.key, a.contentType, data); err != nil {
+			return fmt.Errorf("uploading %s: %w", a.file, err)
+		}
+	}
+	return nil
 }

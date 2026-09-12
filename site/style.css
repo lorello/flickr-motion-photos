@@ -1,0 +1,418 @@
+/* Same web font Flickr's own photo pages use — self-hosted by Flickr at
+   this public, CORS-open URL (verified live), not bundled by us. */
+@font-face {
+  font-family: "Proxima Nova";
+  font-style: normal;
+  font-weight: 400;
+  src: url(https://combo.staticflickr.com/ap/build/fonts/proxima-nova-regular.woff2) format("woff2"),
+       url(https://combo.staticflickr.com/ap/build/fonts/proxima-nova-regular.woff) format("woff");
+}
+@font-face {
+  font-family: "Proxima Nova";
+  font-style: normal;
+  font-weight: 600;
+  src: url(https://combo.staticflickr.com/ap/build/fonts/proxima-nova-semibold.woff2) format("woff2"),
+       url(https://combo.staticflickr.com/ap/build/fonts/proxima-nova-semibold.woff) format("woff");
+}
+@font-face {
+  font-family: "Proxima Nova";
+  font-style: normal;
+  font-weight: 700;
+  src: url(https://combo.staticflickr.com/ap/build/fonts/proxima-nova-bold.woff2) format("woff2"),
+       url(https://combo.staticflickr.com/ap/build/fonts/proxima-nova-bold.woff) format("woff");
+}
+:root {
+  color-scheme: dark;
+  /* Three-step type scale, used everywhere below instead of scattered
+     one-off rem values, so text weight/size reads consistently across
+     every block. */
+  --fs-body: 0.9rem;   /* primary reading text: description, comment text */
+  --fs-meta: 0.85rem;  /* names, links, stats/table values, labels */
+  --fs-small: 0.78rem; /* tags, badges, section headers, secondary labels */
+}
+body {
+  margin: 0;
+  background: #000;
+  color: #fff;
+  font-family: "Proxima Nova", "helvetica neue", helvetica, arial, sans-serif;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+}
+.brandbar {
+  width: 100%;
+  background: #128fdc;
+  color: #fff;
+  font-weight: 700;
+  font-size: var(--fs-meta);
+  letter-spacing: 0.02em;
+  text-align: center;
+  padding: 6px 12px;
+  box-sizing: border-box;
+}
+header {
+  width: 100%;
+  max-width: 1200px;
+  padding: 16px 24px;
+  box-sizing: border-box;
+}
+header a.back {
+  color: #128fdc;
+  text-decoration: none;
+  font-weight: 600;
+  white-space: nowrap;
+}
+main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 0 16px;
+  box-sizing: border-box;
+}
+.stage {
+  position: relative;
+  max-width: 100%;
+}
+.stage img, .stage video {
+  max-width: 100%;
+  max-height: 76vh;
+  display: block;
+}
+.stage video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.iconrow {
+  width: 100%;
+  max-width: 1200px;
+  padding: 10px 24px;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: flex-end;
+  gap: 20px;
+}
+.iconrow button {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 6px;
+  opacity: 0.8;
+}
+.iconrow button:hover {
+  opacity: 1;
+}
+.iconrow button.active {
+  color: #128fdc;
+  opacity: 1;
+}
+.content {
+  width: 100%;
+  background: #f3f5f6;
+  color: #222;
+}
+.content-inner {
+  width: 100%;
+  max-width: 1024px;
+  margin: 0 auto;
+  padding: 20px 24px 8px;
+  box-sizing: border-box;
+  text-align: left;
+  display: flex;
+  gap: 32px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.col-left {
+  flex: 1 1 480px;
+  min-width: 0;
+}
+.col-right {
+  flex: 1 1 320px;
+  max-width: 380px;
+  min-width: 280px;
+}
+.block {
+  padding: 16px 0;
+  border-bottom: 1px solid #e0e0e0;
+}
+.block:first-child {
+  padding-top: 0;
+}
+.block:last-child {
+  border-bottom: none;
+}
+.twocol {
+  display: flex;
+  gap: 20px;
+}
+.twocol > div {
+  flex: 1;
+  min-width: 0;
+}
+.owner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  margin-bottom: 16px;
+}
+.owner img {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: block;
+  flex: none;
+}
+.owner span {
+  color: #222;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+h1 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #222;
+  margin: 0 0 10px;
+}
+.description {
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  color: #333;
+  margin: 0 0 14px;
+  white-space: pre-wrap;
+}
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.badge {
+  display: inline-block;
+  background: #ff0084;
+  color: #fff;
+  font-size: var(--fs-small);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+time {
+  color: #777;
+  font-size: var(--fs-meta);
+}
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tag {
+  background: #e6e9eb;
+  color: #555;
+  font-size: var(--fs-small);
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--fs-meta);
+  color: #555;
+}
+.stats span {
+  display: block;
+}
+.stats strong {
+  color: #222;
+}
+h2 {
+  font-size: var(--fs-small);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #999;
+  margin: 0 0 10px;
+}
+.pillgrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.pillgrid .item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.pillgrid .item img {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  flex: none;
+  display: block;
+}
+.pillgrid .item a {
+  color: #222;
+  text-decoration: none;
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pillgrid .item a:hover {
+  text-decoration: underline;
+}
+.albumgrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.albumgrid .item a {
+  color: #222;
+  text-decoration: none;
+  display: block;
+}
+.albumgrid .item img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 4px;
+  display: block;
+  background: #e6e9eb;
+}
+.albumgrid .title {
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  margin-top: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.albumgrid .count {
+  font-size: var(--fs-small);
+  color: #888;
+}
+.mapwrap {
+  width: 100%;
+  margin-top: 14px;
+}
+.mapwrap iframe {
+  width: 100%;
+  height: 220px;
+  border: 0;
+  border-radius: 4px;
+}
+.commentslabel {
+  font-size: var(--fs-meta);
+  font-weight: 700;
+  color: #222;
+}
+.commentlist {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 14px 0;
+}
+.comment {
+  display: flex;
+  gap: 10px;
+}
+.comment img {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex: none;
+  display: block;
+}
+.comment .body {
+  min-width: 0;
+}
+.comment .author {
+  font-size: var(--fs-meta);
+  font-weight: 700;
+  color: #222;
+  text-decoration: none;
+}
+.comment .author:hover {
+  text-decoration: underline;
+}
+.comment .date {
+  font-size: var(--fs-small);
+  color: #999;
+  margin-left: 6px;
+}
+.comment .text {
+  font-size: var(--fs-body);
+  color: #333;
+  margin: 2px 0 0;
+  white-space: pre-wrap;
+}
+.addcomment {
+  display: inline-block;
+  background: #128fdc;
+  color: #fff;
+  font-size: var(--fs-small);
+  font-weight: 700;
+  text-decoration: none;
+  padding: 6px 14px;
+  border-radius: 999px;
+}
+.addcomment:hover {
+  background: #0f7bbd;
+}
+.infotable {
+  border-collapse: collapse;
+  font-size: var(--fs-meta);
+  width: 100%;
+}
+.infotable th, .infotable td {
+  text-align: left;
+  padding: 6px 0;
+  border-bottom: 1px solid #e0e0e0;
+}
+.infotable th {
+  color: #777;
+  font-weight: 400;
+  width: 45%;
+}
+.infotable td {
+  font-weight: 600;
+}
+.infotable tr:last-child th, .infotable tr:last-child td {
+  border-bottom: none;
+}
+footer {
+  max-width: 1024px;
+  margin: 0 auto;
+  padding: 16px 24px 24px;
+  text-align: left;
+  box-sizing: border-box;
+}
+footer a {
+  color: #888;
+  font-size: var(--fs-small);
+  text-decoration: none;
+}
+footer a:hover {
+  color: #555;
+  text-decoration: underline;
+}
+.disclaimer {
+  color: #999;
+  font-size: var(--fs-small);
+  margin: 0 0 6px;
+}
