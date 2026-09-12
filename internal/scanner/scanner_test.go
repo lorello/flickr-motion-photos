@@ -43,8 +43,12 @@ func (f *fakeReader) GetPhotoFavoritesCount(photoID string) (string, error) { re
 func (f *fakeReader) GetPhotoGeo(photoID string) (string, string, bool, error) {
 	return "", "", false, nil
 }
-func (f *fakeReader) GetPhotoGroups(photoID string) ([]string, error) { return nil, nil }
-func (f *fakeReader) GetPhotoPeople(photoID string) ([]string, error) { return nil, nil }
+func (f *fakeReader) GetPhotoGroups(photoID string) ([]flickrclient.Group, error) { return nil, nil }
+func (f *fakeReader) GetPhotoAlbums(photoID string) ([]flickrclient.Album, error) { return nil, nil }
+func (f *fakeReader) GetPhotoPeople(photoID string) ([]flickrclient.Person, error) { return nil, nil }
+func (f *fakeReader) GetPhotoComments(photoID string) ([]flickrclient.Comment, error) {
+	return nil, nil
+}
 func (f *fakeReader) IsFullyPrivate(photoID string) (bool, error) {
 	return f.private, f.visibilityErr
 }

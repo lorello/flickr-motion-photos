@@ -82,8 +82,10 @@ type Reader interface {
 	GetPhotoExif(photoID string) (flickrclient.PhotoExif, error)
 	GetPhotoFavoritesCount(photoID string) (string, error)
 	GetPhotoGeo(photoID string) (lat, lon string, hasGeo bool, err error)
-	GetPhotoGroups(photoID string) ([]string, error)
-	GetPhotoPeople(photoID string) ([]string, error)
+	GetPhotoGroups(photoID string) ([]flickrclient.Group, error)
+	GetPhotoAlbums(photoID string) ([]flickrclient.Album, error)
+	GetPhotoPeople(photoID string) ([]flickrclient.Person, error)
+	GetPhotoComments(photoID string) ([]flickrclient.Comment, error)
 	IsFullyPrivate(photoID string) (bool, error)
 }
 
@@ -260,14 +262,35 @@ func finishPublish(reader Reader, writer Writer, publisher Publisher, store stat
 	}
 
 	// EXIF and everything below is supplementary (the "additional
-	// information" panel, map, groups, people): each degrades gracefully
-	// on its own if it fails, instead of failing the whole publish — e.g.
-	// getExif/getFavorites/etc. reject anonymous (unauthenticated) calls,
-	// and getGeo "fails" for any non-geotagged photo (the common case).
+	// information" panel, map, groups, people, albums, comments): each
+	// degrades gracefully on its own if it fails, instead of failing the
+	// whole publish — e.g. getExif/getFavorites/etc. reject anonymous
+	// (unauthenticated) calls, and getGeo "fails" for any non-geotagged
+	// photo (the common case).
 	exif, _ := reader.GetPhotoExif(photo.ID)
 	favorites, _ := reader.GetPhotoFavoritesCount(photo.ID)
-	groups, _ := reader.GetPhotoGroups(photo.ID)
-	people, _ := reader.GetPhotoPeople(photo.ID)
+	rawGroups, _ := reader.GetPhotoGroups(photo.ID)
+	rawAlbums, _ := reader.GetPhotoAlbums(photo.ID)
+	flickrclient.BuildAlbumURL(rawAlbums, username)
+	rawPeople, _ := reader.GetPhotoPeople(photo.ID)
+	rawComments, _ := reader.GetPhotoComments(photo.ID)
+
+	groups := make([]sitegen.GroupInfo, 0, len(rawGroups))
+	for _, g := range rawGroups {
+		groups = append(groups, sitegen.GroupInfo{Title: g.Title, IconURL: g.IconURL, URL: g.URL})
+	}
+	albums := make([]sitegen.AlbumInfo, 0, len(rawAlbums))
+	for _, a := range rawAlbums {
+		albums = append(albums, sitegen.AlbumInfo{Title: a.Title, CoverURL: a.CoverURL, URL: a.URL, ItemCount: a.ItemCount})
+	}
+	people := make([]sitegen.PersonInfo, 0, len(rawPeople))
+	for _, p := range rawPeople {
+		people = append(people, sitegen.PersonInfo{Username: p.Username, IconURL: p.IconURL, ProfileURL: p.ProfileURL})
+	}
+	commentList := make([]sitegen.CommentInfo, 0, len(rawComments))
+	for _, c := range rawComments {
+		commentList = append(commentList, sitegen.CommentInfo{Author: c.Author, IconURL: c.IconURL, ProfileURL: c.ProfileURL, Text: c.Text, Date: c.Date})
+	}
 
 	var mapEmbedURL string
 	if lat, lon, hasGeo, geoErr := reader.GetPhotoGeo(photo.ID); geoErr == nil && hasGeo {
@@ -311,12 +334,19 @@ func finishPublish(reader Reader, writer Writer, publisher Publisher, store stat
 		LicenseURL:       details.LicenseURL,
 		MapEmbedURL:      mapEmbedURL,
 		Groups:           groups,
+		Albums:           albums,
 		People:           people,
+		CommentList:      commentList,
 		Camera:           exif.Camera,
 		ExposureTime:     exif.ExposureTime,
 		FNumber:          exif.FNumber,
 		ISO:              exif.ISO,
 		FocalLength:      exif.FocalLength,
+		ContentType:      photo.ContentType,
+		SafetyLevel:      details.SafetyLevel,
+		ViewPrivacy:      details.ViewPrivacy,
+		CommentPerm:      details.CommentPerm,
+		AddMetaPerm:      details.AddMetaPerm,
 	})
 	if err != nil {
 		return "", "", err

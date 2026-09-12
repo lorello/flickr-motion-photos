@@ -11,7 +11,38 @@
   plausible.init()
 </script>
 <style>
-  :root { color-scheme: dark; }
+  /* Same web font Flickr's own photo pages use — self-hosted by Flickr at
+     this public, CORS-open URL (verified live), not bundled by us. */
+  @font-face {
+    font-family: "Proxima Nova";
+    font-style: normal;
+    font-weight: 400;
+    src: url(https://combo.staticflickr.com/ap/build/fonts/proxima-nova-regular.woff2) format("woff2"),
+         url(https://combo.staticflickr.com/ap/build/fonts/proxima-nova-regular.woff) format("woff");
+  }
+  @font-face {
+    font-family: "Proxima Nova";
+    font-style: normal;
+    font-weight: 600;
+    src: url(https://combo.staticflickr.com/ap/build/fonts/proxima-nova-semibold.woff2) format("woff2"),
+         url(https://combo.staticflickr.com/ap/build/fonts/proxima-nova-semibold.woff) format("woff");
+  }
+  @font-face {
+    font-family: "Proxima Nova";
+    font-style: normal;
+    font-weight: 700;
+    src: url(https://combo.staticflickr.com/ap/build/fonts/proxima-nova-bold.woff2) format("woff2"),
+         url(https://combo.staticflickr.com/ap/build/fonts/proxima-nova-bold.woff) format("woff");
+  }
+  :root {
+    color-scheme: dark;
+    /* Three-step type scale, used everywhere below instead of scattered
+       one-off rem values, so text weight/size reads consistently across
+       every block. */
+    --fs-body: 0.9rem;   /* primary reading text: description, comment text */
+    --fs-meta: 0.85rem;  /* names, links, stats/table values, labels */
+    --fs-small: 0.78rem; /* tags, badges, section headers, secondary labels */
+  }
   body {
     margin: 0;
     background: #000;
@@ -27,7 +58,7 @@
     background: #128fdc;
     color: #fff;
     font-weight: 700;
-    font-size: 0.85rem;
+    font-size: var(--fs-meta);
     letter-spacing: 0.02em;
     text-align: center;
     padding: 6px 12px;
@@ -104,11 +135,42 @@
   }
   .content-inner {
     width: 100%;
-    max-width: 700px;
+    max-width: 1024px;
     margin: 0 auto;
     padding: 20px 24px 8px;
     box-sizing: border-box;
     text-align: left;
+    display: flex;
+    gap: 32px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .col-left {
+    flex: 1 1 480px;
+    min-width: 0;
+  }
+  .col-right {
+    flex: 1 1 320px;
+    max-width: 380px;
+    min-width: 280px;
+  }
+  .block {
+    padding: 16px 0;
+    border-bottom: 1px solid #e0e0e0;
+  }
+  .block:first-child {
+    padding-top: 0;
+  }
+  .block:last-child {
+    border-bottom: none;
+  }
+  .twocol {
+    display: flex;
+    gap: 20px;
+  }
+  .twocol > div {
+    flex: 1;
+    min-width: 0;
   }
   .owner {
     display: flex;
@@ -138,7 +200,7 @@
     margin: 0 0 10px;
   }
   .description {
-    font-size: 0.9rem;
+    font-size: var(--fs-body);
     line-height: 1.5;
     color: #333;
     margin: 0 0 14px;
@@ -149,13 +211,12 @@
     align-items: center;
     gap: 10px;
     flex-wrap: wrap;
-    margin-bottom: 14px;
   }
   .badge {
     display: inline-block;
     background: #ff0084;
     color: #fff;
-    font-size: 0.75rem;
+    font-size: var(--fs-small);
     font-weight: 700;
     letter-spacing: 0.02em;
     padding: 3px 10px;
@@ -163,64 +224,104 @@
   }
   time {
     color: #777;
-    font-size: 0.85rem;
+    font-size: var(--fs-meta);
   }
   .tags {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin-bottom: 14px;
   }
   .tag {
     background: #e6e9eb;
     color: #555;
-    font-size: 0.8rem;
+    font-size: var(--fs-small);
     padding: 4px 10px;
     border-radius: 999px;
   }
   .stats {
     display: flex;
-    gap: 14px;
-    font-size: 0.82rem;
-    color: #777;
-    margin-bottom: 14px;
+    flex-direction: column;
+    gap: 6px;
+    font-size: var(--fs-meta);
+    color: #555;
   }
-  .submeta {
-    font-size: 0.8rem;
-    color: #888;
-    margin-bottom: 14px;
+  .stats span {
+    display: block;
   }
-  .submeta a {
-    color: #128fdc;
-    text-decoration: none;
+  .stats strong {
+    color: #222;
   }
-  .section {
-    margin-bottom: 14px;
-  }
-  .section h2 {
-    font-size: 0.75rem;
+  h2 {
+    font-size: var(--fs-small);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.03em;
     color: #999;
-    margin: 0 0 8px;
+    margin: 0 0 10px;
   }
-  .pills {
+  .pillgrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .pillgrid .item {
     display: flex;
-    flex-wrap: wrap;
+    align-items: center;
     gap: 8px;
+    min-width: 0;
   }
-  .pill {
+  .pillgrid .item img {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    flex: none;
+    display: block;
+  }
+  .pillgrid .item a {
+    color: #222;
+    text-decoration: none;
+    font-size: var(--fs-meta);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pillgrid .item a:hover {
+    text-decoration: underline;
+  }
+  .albumgrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .albumgrid .item a {
+    color: #222;
+    text-decoration: none;
+    display: block;
+  }
+  .albumgrid .item img {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border-radius: 4px;
+    display: block;
     background: #e6e9eb;
-    color: #555;
-    font-size: 0.8rem;
-    padding: 4px 10px;
-    border-radius: 999px;
+  }
+  .albumgrid .title {
+    font-size: var(--fs-meta);
+    font-weight: 600;
+    margin-top: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .albumgrid .count {
+    font-size: var(--fs-small);
+    color: #888;
   }
   .mapwrap {
     width: 100%;
-    max-width: 420px;
-    margin-bottom: 14px;
+    margin-top: 14px;
   }
   .mapwrap iframe {
     width: 100%;
@@ -228,23 +329,56 @@
     border: 0;
     border-radius: 4px;
   }
-  .commentsrow {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 0;
-    border-top: 1px solid #e0e0e0;
-  }
   .commentslabel {
-    font-size: 0.85rem;
+    font-size: var(--fs-meta);
     font-weight: 700;
     color: #222;
+  }
+  .commentlist {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin: 14px 0;
+  }
+  .comment {
+    display: flex;
+    gap: 10px;
+  }
+  .comment img {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    flex: none;
+    display: block;
+  }
+  .comment .body {
+    min-width: 0;
+  }
+  .comment .author {
+    font-size: var(--fs-meta);
+    font-weight: 700;
+    color: #222;
+    text-decoration: none;
+  }
+  .comment .author:hover {
+    text-decoration: underline;
+  }
+  .comment .date {
+    font-size: var(--fs-small);
+    color: #999;
+    margin-left: 6px;
+  }
+  .comment .text {
+    font-size: var(--fs-body);
+    color: #333;
+    margin: 2px 0 0;
+    white-space: pre-wrap;
   }
   .addcomment {
     display: inline-block;
     background: #128fdc;
     color: #fff;
-    font-size: 0.8rem;
+    font-size: var(--fs-small);
     font-weight: 700;
     text-decoration: none;
     padding: 6px 14px;
@@ -253,40 +387,37 @@
   .addcomment:hover {
     background: #0f7bbd;
   }
-  .infopanel {
-    width: 100%;
-    max-width: 420px;
-    padding: 12px 0 4px;
-    box-sizing: border-box;
-  }
-  .infopanel table {
+  .infotable {
     border-collapse: collapse;
-    font-size: 0.85rem;
+    font-size: var(--fs-meta);
     width: 100%;
   }
-  .infopanel th, .infopanel td {
+  .infotable th, .infotable td {
     text-align: left;
     padding: 6px 0;
     border-bottom: 1px solid #e0e0e0;
   }
-  .infopanel th {
+  .infotable th {
     color: #777;
     font-weight: 400;
-    width: 40%;
+    width: 45%;
   }
-  .infopanel td {
+  .infotable td {
     font-weight: 600;
   }
-  .infopanel tr:last-child th, .infopanel tr:last-child td {
+  .infotable tr:last-child th, .infotable tr:last-child td {
     border-bottom: none;
   }
   footer {
+    max-width: 1024px;
+    margin: 0 auto;
     padding: 16px 24px 24px;
     text-align: left;
+    box-sizing: border-box;
   }
   footer a {
     color: #888;
-    font-size: 0.8rem;
+    font-size: var(--fs-small);
     text-decoration: none;
   }
   footer a:hover {
@@ -295,7 +426,7 @@
   }
   .disclaimer {
     color: #999;
-    font-size: 0.72rem;
+    font-size: var(--fs-small);
     margin: 0 0 6px;
   }
 </style>
@@ -317,68 +448,143 @@
   </div>
   <div class="content">
     <div class="content-inner">
-      {{if .OwnerName}}
-      <div class="owner">
-        <img src="{{.OwnerAvatarURL}}" alt="">
-        <span>{{.OwnerName}}</span>
+      <div class="col-left">
+
+        <div class="block">
+          {{if .OwnerName}}
+          <div class="owner">
+            <img src="{{.OwnerAvatarURL}}" alt="">
+            <span>{{.OwnerName}}</span>
+          </div>
+          {{end}}
+          <h1>{{.Title}}</h1>
+          <div class="meta">
+            <span class="badge">Motion Photo</span>
+            {{if .DateTaken}}<time>{{.DateTaken}}</time>{{end}}
+          </div>
+          {{if .OwnerDescription}}<p class="description">{{.OwnerDescription}}</p>{{end}}
+        </div>
+
+        <div class="block">
+          <div class="commentslabel">Comments ({{if .Comments}}{{.Comments}}{{else}}0{{end}})</div>
+          {{if .CommentList}}
+          <div class="commentlist">
+            {{range .CommentList}}
+            <div class="comment">
+              <img src="{{.IconURL}}" alt="">
+              <div class="body">
+                <a class="author" href="{{.ProfileURL}}">{{.Author}}</a>{{if .Date}}<span class="date">{{.Date}}</span>{{end}}
+                <p class="text">{{.Text}}</p>
+              </div>
+            </div>
+            {{end}}
+          </div>
+          {{end}}
+          <a class="addcomment" href="{{.PhotoPageURL}}">Add a comment</a>
+        </div>
+
       </div>
-      {{end}}
-      <h1>{{.Title}}</h1>
-      {{if .OwnerDescription}}<p class="description">{{.OwnerDescription}}</p>{{end}}
-      <div class="meta">
-        <span class="badge">Motion Photo</span>
-        {{if .DateTaken}}<time>{{.DateTaken}}</time>{{end}}
-      </div>
-      {{if or .Views .Favorites .Comments .PageViews}}
-      <div class="stats">
-        {{if .Views}}<span>{{.Views}} views</span>{{end}}
-        {{if .Favorites}}<span>{{.Favorites}} faves</span>{{end}}
-        {{if .Comments}}<span>{{.Comments}} comments</span>{{end}}
-        {{if .PageViews}}<span>{{.PageViews}} page views</span>{{end}}
-      </div>
-      {{end}}
-      {{if .Tags}}
-      <div class="tags">
-        {{range .Tags}}<span class="tag">{{.}}</span>{{end}}
-      </div>
-      {{end}}
-      {{if .Groups}}
-      <div class="section">
-        <h2>Groups</h2>
-        <div class="pills">{{range .Groups}}<span class="pill">{{.}}</span>{{end}}</div>
-      </div>
-      {{end}}
-      {{if .People}}
-      <div class="section">
-        <h2>People</h2>
-        <div class="pills">{{range .People}}<span class="pill">{{.}}</span>{{end}}</div>
-      </div>
-      {{end}}
-      {{if or .DateUploaded .LicenseName}}
-      <div class="submeta">
-        {{if .DateUploaded}}Uploaded {{.DateUploaded}}{{end}}
-        {{if .LicenseName}} · <a href="{{.LicenseURL}}">{{.LicenseName}}</a>{{end}}
-      </div>
-      {{end}}
-      {{if .MapEmbedURL}}
-      <div class="mapwrap">
-        <iframe src="{{.MapEmbedURL}}" loading="lazy" title="Photo location"></iframe>
-      </div>
-      {{end}}
-      {{if .Camera}}
-      <div class="infopanel">
-        <table>
-          {{if .Camera}}<tr><th>Camera</th><td>{{.Camera}}</td></tr>{{end}}
-          {{if .ExposureTime}}<tr><th>Exposure</th><td>{{.ExposureTime}}</td></tr>{{end}}
-          {{if .FNumber}}<tr><th>Aperture</th><td>{{.FNumber}}</td></tr>{{end}}
-          {{if .ISO}}<tr><th>ISO Speed</th><td>{{.ISO}}</td></tr>{{end}}
-          {{if .FocalLength}}<tr><th>Focal Length</th><td>{{.FocalLength}}</td></tr>{{end}}
-        </table>
-      </div>
-      {{end}}
-      <div class="commentsrow">
-        <span class="commentslabel">Comments ({{if .Comments}}{{.Comments}}{{else}}0{{end}})</span>
-        <a class="addcomment" href="{{.PhotoPageURL}}">Add a comment</a>
+      <div class="col-right">
+
+        <div class="block">
+          <div class="twocol">
+            <div class="stats">
+              {{if .Views}}<span><strong>{{.Views}}</strong> views</span>{{end}}
+              {{if .Favorites}}<span><strong>{{.Favorites}}</strong> faves</span>{{end}}
+              {{if .Comments}}<span><strong>{{.Comments}}</strong> comments</span>{{end}}
+              {{if .PageViews}}<span><strong>{{.PageViews}}</strong> page views</span>{{end}}
+            </div>
+            <div class="stats">
+              {{if .DateUploaded}}<span>Uploaded {{.DateUploaded}}</span>{{end}}
+              {{if .DateTaken}}<span>Taken {{.DateTaken}}</span>{{end}}
+              {{if .LicenseName}}<span><a href="{{.LicenseURL}}">{{.LicenseName}}</a></span>{{end}}
+            </div>
+          </div>
+        </div>
+
+        {{if or .Camera .MapEmbedURL .Groups .Albums}}
+        <div class="block">
+          {{if .Camera}}
+          <table class="infotable">
+            {{if .Camera}}<tr><th>Camera</th><td>{{.Camera}}</td></tr>{{end}}
+            {{if .ExposureTime}}<tr><th>Exposure</th><td>{{.ExposureTime}}</td></tr>{{end}}
+            {{if .FNumber}}<tr><th>Aperture</th><td>{{.FNumber}}</td></tr>{{end}}
+            {{if .ISO}}<tr><th>ISO Speed</th><td>{{.ISO}}</td></tr>{{end}}
+            {{if .FocalLength}}<tr><th>Focal Length</th><td>{{.FocalLength}}</td></tr>{{end}}
+          </table>
+          {{end}}
+          {{if .MapEmbedURL}}
+          <div class="mapwrap">
+            <iframe src="{{.MapEmbedURL}}" loading="lazy" title="Photo location"></iframe>
+          </div>
+          {{end}}
+          {{if .Groups}}
+          <h2 style="margin-top:14px">Groups</h2>
+          <div class="pillgrid">
+            {{range .Groups}}
+            <div class="item">
+              <img src="{{.IconURL}}" alt="">
+              <a href="{{.URL}}">{{.Title}}</a>
+            </div>
+            {{end}}
+          </div>
+          {{end}}
+          {{if .Albums}}
+          <h2 style="margin-top:14px">Albums</h2>
+          <div class="albumgrid">
+            {{range .Albums}}
+            <div class="item">
+              <a href="{{.URL}}">
+                <img src="{{.CoverURL}}" alt="">
+                <div class="title">{{.Title}}</div>
+                <div class="count">{{.ItemCount}} items</div>
+              </a>
+            </div>
+            {{end}}
+          </div>
+          {{end}}
+        </div>
+        {{end}}
+
+        {{if or .Tags .People}}
+        <div class="block">
+          <div class="twocol">
+            <div>
+              {{if .Tags}}
+              <h2>Tags</h2>
+              <div class="tags">
+                {{range .Tags}}<span class="tag">{{.}}</span>{{end}}
+              </div>
+              {{end}}
+            </div>
+            <div>
+              {{if .People}}
+              <h2>People</h2>
+              <div class="pillgrid" style="grid-template-columns: 1fr">
+                {{range .People}}
+                <div class="item">
+                  <img src="{{.IconURL}}" alt="">
+                  <a href="{{.ProfileURL}}">{{.Username}}</a>
+                </div>
+                {{end}}
+              </div>
+              {{end}}
+            </div>
+          </div>
+        </div>
+        {{end}}
+
+        <div class="block">
+          <h2>Additional Information</h2>
+          <table class="infotable">
+            {{if .ContentType}}<tr><th>Content type</th><td>{{.ContentType}}</td></tr>{{end}}
+            {{if .SafetyLevel}}<tr><th>Safety level</th><td>{{.SafetyLevel}}</td></tr>{{end}}
+            {{if .ViewPrivacy}}<tr><th>View privacy</th><td>{{.ViewPrivacy}}</td></tr>{{end}}
+            {{if .CommentPerm}}<tr><th>Who can comment</th><td>{{.CommentPerm}}</td></tr>{{end}}
+            {{if .AddMetaPerm}}<tr><th>Who can add tags/notes/people</th><td>{{.AddMetaPerm}}</td></tr>{{end}}
+          </table>
+        </div>
+
       </div>
     </div>
     <footer>

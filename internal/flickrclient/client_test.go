@@ -99,7 +99,7 @@ func TestGetPhotosPageExtractsIDTitleTagsWithoutPrivacyFilterWhenAnonymous(t *te
 	if !reflect.DeepEqual(photos, want) {
 		t.Fatalf("got %+v, want %+v", photos, want)
 	}
-	if capturedParams["extras"] != "tags,media" {
+	if capturedParams["extras"] != "tags,media,content_type" {
 		t.Fatalf("expected extras to include media, got %q", capturedParams["extras"])
 	}
 	if _, ok := capturedParams["privacy_filter"]; ok {
@@ -482,8 +482,8 @@ func TestGetPhotoGroupsExtractsPoolTitles(t *testing.T) {
 		return jsonBody(map[string]interface{}{
 			"stat": "ok",
 			"pool": []interface{}{
-				map[string]interface{}{"title": "Sunsets"},
-				map[string]interface{}{"title": "Nature"},
+				map[string]interface{}{"id": "111@N01", "title": "Sunsets", "iconserver": "5", "iconfarm": 6.0},
+				map[string]interface{}{"id": "222@N01", "title": "Nature"},
 			},
 		}), nil
 	})
@@ -492,8 +492,17 @@ func TestGetPhotoGroupsExtractsPoolTitles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(groups) != 2 || groups[0] != "Sunsets" || groups[1] != "Nature" {
-		t.Fatalf("got %v", groups)
+	if len(groups) != 2 || groups[0].Title != "Sunsets" || groups[1].Title != "Nature" {
+		t.Fatalf("got %+v", groups)
+	}
+	if groups[0].IconURL != "https://farm6.staticflickr.com/5/buddyicons/111@N01.jpg" {
+		t.Fatalf("unexpected icon URL: %s", groups[0].IconURL)
+	}
+	if groups[1].IconURL != defaultBuddyIconURL {
+		t.Fatalf("expected default icon for group without iconserver, got %s", groups[1].IconURL)
+	}
+	if groups[0].URL != "https://www.flickr.com/groups/111@N01/" {
+		t.Fatalf("unexpected group URL: %s", groups[0].URL)
 	}
 }
 
@@ -520,8 +529,8 @@ func TestGetPhotoPeopleExtractsUsernames(t *testing.T) {
 			"stat": "ok",
 			"people": map[string]interface{}{
 				"person": []interface{}{
-					map[string]interface{}{"username": "alice"},
-					map[string]interface{}{"username": "bob"},
+					map[string]interface{}{"username": "alice", "nsid": "111@N01", "path_alias": "alicealias"},
+					map[string]interface{}{"username": "bob", "nsid": "222@N01"},
 				},
 			},
 		}), nil
@@ -531,8 +540,77 @@ func TestGetPhotoPeopleExtractsUsernames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(people) != 2 || people[0] != "alice" || people[1] != "bob" {
-		t.Fatalf("got %v", people)
+	if len(people) != 2 || people[0].Username != "alice" || people[1].Username != "bob" {
+		t.Fatalf("got %+v", people)
+	}
+	if people[0].ProfileURL != "https://www.flickr.com/photos/alicealias/" {
+		t.Fatalf("expected path_alias in profile URL, got %s", people[0].ProfileURL)
+	}
+	if people[1].ProfileURL != "https://www.flickr.com/photos/222@N01/" {
+		t.Fatalf("expected nsid fallback in profile URL, got %s", people[1].ProfileURL)
+	}
+}
+
+func TestGetPhotoAlbumsExtractsSetsWithCover(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat": "ok",
+			"set": []interface{}{
+				map[string]interface{}{
+					"id": "72177720333153880", "title": "2025-12-27 Nozzano",
+					"primary": "55008303765", "secret": "f1c8c1b5ce", "server": "65535",
+					"count_photo": 45.0, "count_video": 2.0,
+				},
+			},
+		}), nil
+	})
+	client := makeClient()
+	albums, err := client.GetPhotoAlbums("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(albums) != 1 || albums[0].Title != "2025-12-27 Nozzano" {
+		t.Fatalf("got %+v", albums)
+	}
+	if albums[0].ItemCount != 47 {
+		t.Fatalf("expected count_photo+count_video=47, got %d", albums[0].ItemCount)
+	}
+	if albums[0].CoverURL != "https://live.staticflickr.com/65535/55008303765_f1c8c1b5ce_q.jpg" {
+		t.Fatalf("unexpected cover URL: %s", albums[0].CoverURL)
+	}
+	BuildAlbumURL(albums, "lorello")
+	if albums[0].URL != "https://www.flickr.com/photos/lorello/albums/72177720333153880" {
+		t.Fatalf("unexpected album URL: %s", albums[0].URL)
+	}
+}
+
+func TestGetPhotoCommentsExtractsAuthorAndText(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat": "ok",
+			"comments": map[string]interface{}{
+				"comment": []interface{}{
+					map[string]interface{}{
+						"author": "111@N01", "authorname": "Jan", "path_alias": "jan_h",
+						"_content": `Nice <a href="https://example.com">shot</a>!`, "datecreate": "1766845151",
+					},
+				},
+			},
+		}), nil
+	})
+	client := makeClient()
+	comments, err := client.GetPhotoComments("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(comments) != 1 || comments[0].Author != "Jan" {
+		t.Fatalf("got %+v", comments)
+	}
+	if comments[0].Text != "Nice shot!" {
+		t.Fatalf("expected HTML stripped from comment text, got %q", comments[0].Text)
+	}
+	if comments[0].ProfileURL != "https://www.flickr.com/photos/jan_h/" {
+		t.Fatalf("unexpected profile URL: %s", comments[0].ProfileURL)
 	}
 }
 

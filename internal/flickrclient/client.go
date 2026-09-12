@@ -231,6 +231,11 @@ type Photo struct {
 	// out before attempting a download avoids a guaranteed-to-fail
 	// original-file request (confirmed live: Flickr's CDN 500s on it).
 	Media string
+	// ContentType is "Photo", "Screenshot" or "Other" — Flickr's own
+	// extras=content_type field (0/1/2), only available from a listing
+	// call (not from getInfo), so it's empty when a Photo comes from
+	// GetPhoto (single-ID fetch) instead of GetPhotosPage/GetPhotosetPhotos.
+	ContentType string
 }
 
 // Client parla con l'API REST di Flickr. Se AccessToken/AccessTokenSecret
@@ -373,7 +378,9 @@ func (c *Client) IsFullyPrivate(photoID string) (bool, error) {
 }
 
 // PhotoDetails carries the extra display metadata the viewer page uses,
-// all sourced from a single getInfo call (no extra API cost per photo).
+// all sourced from a single getInfo call (no extra API cost per photo),
+// plus one flickr.photos.getPerms call for the comment/add-metadata
+// permission levels (not part of getInfo).
 type PhotoDetails struct {
 	OwnerName      string
 	OwnerAvatarURL string
@@ -384,10 +391,38 @@ type PhotoDetails struct {
 	Comments       string
 	LicenseName    string
 	LicenseURL     string
+	SafetyLevel    string // "Safe" | "Moderate" | "Restricted"
+	ViewPrivacy    string // "Public" | "Friends" | "Family" | "Friends & Family" | "Only you"
+	CommentPerm    string // who can comment: "Everyone" | "Your contacts" | "Friends and family" | "Only you"
+	AddMetaPerm    string // who can add tags/notes/people: same scale as CommentPerm
 }
 
-// GetPhotoDetails returns owner/avatar/date/tags for the viewer page.
-// Internal status tags (flickrmp:*) are filtered out — they're not
+var safetyLevelNames = map[string]string{"0": "Safe", "1": "Moderate", "2": "Restricted"}
+
+// permLevelNames maps flickr.photos.getPerms' permcomment/permaddmeta
+// values to the exact wording Flickr's own privacy UI uses.
+var permLevelNames = map[string]string{"0": "Only you", "1": "Friends and family", "2": "Your contacts", "3": "Everyone"}
+
+func viewPrivacyName(visibility map[string]interface{}) string {
+	isPublic, _ := visibility["ispublic"].(float64)
+	isFriend, _ := visibility["isfriend"].(float64)
+	isFamily, _ := visibility["isfamily"].(float64)
+	switch {
+	case isPublic == 1:
+		return "Public"
+	case isFriend == 1 && isFamily == 1:
+		return "Friends & Family"
+	case isFriend == 1:
+		return "Friends"
+	case isFamily == 1:
+		return "Family"
+	default:
+		return "Only you"
+	}
+}
+
+// GetPhotoDetails returns owner/avatar/date/tags/privacy for the viewer
+// page. Internal status tags (flickrmp:*) are filtered out — they're not
 // meant for display.
 func (c *Client) GetPhotoDetails(photoID string) (PhotoDetails, error) {
 	info, err := c.getPhotoInfo(photoID)
@@ -398,13 +433,9 @@ func (c *Client) GetPhotoDetails(photoID string) (PhotoDetails, error) {
 	owner, _ := info["owner"].(map[string]interface{})
 	username, _ := owner["username"].(string)
 	nsid, _ := owner["nsid"].(string)
-	iconServer, _ := owner["iconserver"].(string)
-	iconFarm, _ := owner["iconfarm"].(float64)
-
-	avatarURL := "https://www.flickr.com/images/buddyicon.gif"
-	if iconServer != "" && iconServer != "0" {
-		avatarURL = fmt.Sprintf("https://farm%d.staticflickr.com/%s/buddyicons/%s.jpg", int(iconFarm), iconServer, nsid)
-	}
+	ownerIconServer, _ := owner["iconserver"].(string)
+	ownerIconFarm, _ := owner["iconfarm"].(float64)
+	avatarURL := buddyIconURL(ownerIconServer, ownerIconFarm, nsid)
 
 	dates, _ := info["dates"].(map[string]interface{})
 	dateTaken, _ := dates["taken"].(string)
@@ -434,12 +465,27 @@ func (c *Client) GetPhotoDetails(photoID string) (PhotoDetails, error) {
 	}
 
 	licenseID, _ := info["license"].(string)
+	safetyLevel, _ := info["safety_level"].(string)
+	visibility, _ := info["visibility"].(map[string]interface{})
+
+	var commentPerm, addMetaPerm string
+	if permsResult, permsErr := c.Call("flickr.photos.getPerms", map[string]string{"photo_id": photoID}); permsErr == nil {
+		perms, _ := permsResult["perms"].(map[string]interface{})
+		if v, ok := perms["permcomment"].(float64); ok {
+			commentPerm = permLevelNames[strconv.Itoa(int(v))]
+		}
+		if v, ok := perms["permaddmeta"].(float64); ok {
+			addMetaPerm = permLevelNames[strconv.Itoa(int(v))]
+		}
+	}
 
 	return PhotoDetails{
 		OwnerName: username, OwnerAvatarURL: avatarURL,
 		DateTaken: dateTaken, DateUploaded: dateUploaded,
 		Tags: tags, Views: views, Comments: comments,
 		LicenseName: licenseNames[licenseID], LicenseURL: licenseURLs[licenseID],
+		SafetyLevel: safetyLevelNames[safetyLevel], ViewPrivacy: viewPrivacyName(visibility),
+		CommentPerm: commentPerm, AddMetaPerm: addMetaPerm,
 	}, nil
 }
 
@@ -500,43 +546,213 @@ func (c *Client) GetPhotoGeo(photoID string) (lat, lon string, hasGeo bool, err 
 	return lat, lon, true, nil
 }
 
-// GetPhotoGroups returns the names of the groups (pools) this photo has
-// been added to, if any.
-func (c *Client) GetPhotoGroups(photoID string) ([]string, error) {
+// Group is a Flickr group pool this photo has been added to.
+type Group struct {
+	ID      string
+	Title   string
+	IconURL string
+	URL     string
+}
+
+// Person is someone tagged in this photo.
+type Person struct {
+	Username   string
+	IconURL    string
+	ProfileURL string
+}
+
+// Album is a Flickr photoset (album) containing this photo. URL is left
+// for the caller to fill in (needs the owner's username, which this
+// package doesn't otherwise track) via BuildAlbumURL.
+type Album struct {
+	ID        string
+	Title     string
+	CoverURL  string
+	ItemCount int
+	URL       string
+}
+
+// BuildAlbumURL fills in Album.URL for every album in the slice, given the
+// owner's Flickr username (the URL path segment, not the display name).
+func BuildAlbumURL(albums []Album, username string) {
+	for i := range albums {
+		albums[i].URL = fmt.Sprintf("https://www.flickr.com/photos/%s/albums/%s", username, albums[i].ID)
+	}
+}
+
+const defaultBuddyIconURL = "https://www.flickr.com/images/buddyicon.gif"
+
+func buddyIconURL(iconServer string, iconFarm float64, nsid string) string {
+	if iconServer == "" || iconServer == "0" {
+		return defaultBuddyIconURL
+	}
+	return fmt.Sprintf("https://farm%d.staticflickr.com/%s/buddyicons/%s.jpg", int(iconFarm), iconServer, nsid)
+}
+
+// GetPhotoGroups returns the groups (pools) this photo has been added to,
+// if any.
+func (c *Client) GetPhotoGroups(photoID string) ([]Group, error) {
 	result, err := c.Call("flickr.photos.getAllContexts", map[string]string{"photo_id": photoID})
 	if err != nil {
 		return nil, err
 	}
 	rawPools, _ := result["pool"].([]interface{})
-	groups := make([]string, 0, len(rawPools))
+	groups := make([]Group, 0, len(rawPools))
 	for _, item := range rawPools {
 		p, _ := item.(map[string]interface{})
+		id, _ := p["id"].(string)
 		title, _ := p["title"].(string)
-		if title != "" {
-			groups = append(groups, title)
+		if title == "" {
+			continue
 		}
+		iconServer, _ := p["iconserver"].(string)
+		iconFarm, _ := p["iconfarm"].(float64)
+		groups = append(groups, Group{
+			ID:      id,
+			Title:   title,
+			IconURL: buddyIconURL(iconServer, iconFarm, id),
+			URL:     fmt.Sprintf("https://www.flickr.com/groups/%s/", id),
+		})
 	}
 	return groups, nil
 }
 
-// GetPhotoPeople returns the usernames of people tagged in this photo, if
-// any.
-func (c *Client) GetPhotoPeople(photoID string) ([]string, error) {
+// GetPhotoAlbums returns the albums (photosets) this photo belongs to, if
+// any. Album.URL is empty until BuildAlbumURL fills it in.
+func (c *Client) GetPhotoAlbums(photoID string) ([]Album, error) {
+	result, err := c.Call("flickr.photos.getAllContexts", map[string]string{"photo_id": photoID})
+	if err != nil {
+		return nil, err
+	}
+	rawSets, _ := result["set"].([]interface{})
+	albums := make([]Album, 0, len(rawSets))
+	for _, item := range rawSets {
+		s, _ := item.(map[string]interface{})
+		id, _ := s["id"].(string)
+		title, _ := s["title"].(string)
+		if title == "" {
+			continue
+		}
+		primary, _ := s["primary"].(string)
+		secret, _ := s["secret"].(string)
+		server, _ := s["server"].(string)
+		countPhoto, _ := s["count_photo"].(float64)
+		countVideo, _ := s["count_video"].(float64)
+		coverURL := ""
+		if primary != "" && secret != "" && server != "" {
+			coverURL = fmt.Sprintf("https://live.staticflickr.com/%s/%s_%s_q.jpg", server, primary, secret)
+		}
+		albums = append(albums, Album{
+			ID:        id,
+			Title:     title,
+			CoverURL:  coverURL,
+			ItemCount: int(countPhoto) + int(countVideo),
+		})
+	}
+	return albums, nil
+}
+
+// GetPhotoPeople returns the people tagged in this photo, if any.
+func (c *Client) GetPhotoPeople(photoID string) ([]Person, error) {
 	result, err := c.Call("flickr.photos.people.getList", map[string]string{"photo_id": photoID})
 	if err != nil {
 		return nil, err
 	}
 	peopleObj, _ := result["people"].(map[string]interface{})
 	rawPeople, _ := peopleObj["person"].([]interface{})
-	people := make([]string, 0, len(rawPeople))
+	people := make([]Person, 0, len(rawPeople))
 	for _, item := range rawPeople {
 		p, _ := item.(map[string]interface{})
 		username, _ := p["username"].(string)
-		if username != "" {
-			people = append(people, username)
+		if username == "" {
+			continue
 		}
+		nsid, _ := p["nsid"].(string)
+		iconServer, _ := p["iconserver"].(string)
+		iconFarm, _ := p["iconfarm"].(float64)
+		profileSlug := nsid
+		if pathAlias, _ := p["path_alias"].(string); pathAlias != "" {
+			profileSlug = pathAlias
+		}
+		people = append(people, Person{
+			Username:   username,
+			IconURL:    buddyIconURL(iconServer, iconFarm, nsid),
+			ProfileURL: fmt.Sprintf("https://www.flickr.com/photos/%s/", profileSlug),
+		})
 	}
 	return people, nil
+}
+
+// Comment is one comment on this photo. Text is plain text (HTML stripped
+// by the caller/template) — comment bodies come from arbitrary Flickr
+// users and are never trusted as safe markup, unlike our own generated
+// content elsewhere on the page.
+type Comment struct {
+	Author     string
+	IconURL    string
+	ProfileURL string
+	Text       string
+	Date       string
+}
+
+// GetPhotoComments returns this photo's comments, oldest first (Flickr's
+// own listing order).
+func (c *Client) GetPhotoComments(photoID string) ([]Comment, error) {
+	result, err := c.Call("flickr.photos.comments.getList", map[string]string{"photo_id": photoID})
+	if err != nil {
+		return nil, err
+	}
+	commentsObj, _ := result["comments"].(map[string]interface{})
+	rawComments, _ := commentsObj["comment"].([]interface{})
+	comments := make([]Comment, 0, len(rawComments))
+	for _, item := range rawComments {
+		c, _ := item.(map[string]interface{})
+		authorName, _ := c["authorname"].(string)
+		content, _ := c["_content"].(string)
+		if authorName == "" {
+			continue
+		}
+		author, _ := c["author"].(string)
+		iconServer, _ := c["iconserver"].(string)
+		iconFarm, _ := c["iconfarm"].(float64)
+		profileSlug := author
+		if pathAlias, _ := c["path_alias"].(string); pathAlias != "" {
+			profileSlug = pathAlias
+		}
+		var date string
+		if rawDate, _ := c["datecreate"].(string); rawDate != "" {
+			if secs, err := strconv.ParseInt(rawDate, 10, 64); err == nil {
+				date = time.Unix(secs, 0).UTC().Format("2006-01-02")
+			}
+		}
+		comments = append(comments, Comment{
+			Author:     authorName,
+			IconURL:    buddyIconURL(iconServer, iconFarm, author),
+			ProfileURL: fmt.Sprintf("https://www.flickr.com/photos/%s/", profileSlug),
+			Text:       stripHTMLTags(content),
+			Date:       date,
+		})
+	}
+	return comments, nil
+}
+
+// stripHTMLTags removes HTML tags from Flickr's comment _content, which
+// may contain basic markup (e.g. auto-linkified URLs) — treated as plain
+// text since comment bodies come from arbitrary Flickr users.
+func stripHTMLTags(s string) string {
+	var b strings.Builder
+	inTag := false
+	for _, r := range s {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // PhotoExif carries camera/exposure info for the viewer page's "additional
@@ -607,7 +823,7 @@ func (c *Client) FindUserIDByUsername(username string) (string, error) {
 func (c *Client) GetPhotosPage(userID string, page, perPage int) ([]Photo, error) {
 	params := map[string]string{
 		"user_id":  userID,
-		"extras":   "tags,media",
+		"extras":   "tags,media,content_type",
 		"page":     strconv.Itoa(page),
 		"per_page": strconv.Itoa(perPage),
 	}
@@ -623,7 +839,7 @@ func (c *Client) GetPhotosPage(userID string, page, perPage int) ([]Photo, error
 func (c *Client) GetPhotosetPhotos(photosetID string, page, perPage int) ([]Photo, error) {
 	params := map[string]string{
 		"photoset_id": photosetID,
-		"extras":      "tags,media",
+		"extras":      "tags,media,content_type",
 		"page":        strconv.Itoa(page),
 		"per_page":    strconv.Itoa(perPage),
 	}
@@ -661,6 +877,22 @@ func (c *Client) GetPhoto(photoID string) (Photo, error) {
 	return Photo{ID: photoID, Title: title, Tags: tags, Media: media}, nil
 }
 
+var contentTypeNames = map[string]string{"0": "Photo", "1": "Screenshot", "2": "Other"}
+
+// contentTypeString reads extras=content_type, which Flickr returns
+// inconsistently as either a JSON string ("0") or a JSON number (0)
+// depending on the endpoint.
+func contentTypeString(v interface{}) string {
+	switch t := v.(type) {
+	case string:
+		return contentTypeNames[t]
+	case float64:
+		return contentTypeNames[strconv.Itoa(int(t))]
+	default:
+		return ""
+	}
+}
+
 func parsePhotoList(container map[string]interface{}) []Photo {
 	rawList, _ := container["photo"].([]interface{})
 	photos := make([]Photo, 0, len(rawList))
@@ -670,11 +902,12 @@ func parsePhotoList(container map[string]interface{}) []Photo {
 		title, _ := p["title"].(string)
 		rawTags, _ := p["tags"].(string)
 		media, _ := p["media"].(string)
+		contentType := contentTypeString(p["content_type"])
 		tags := []string{}
 		if rawTags != "" {
 			tags = strings.Split(rawTags, " ")
 		}
-		photos = append(photos, Photo{ID: id, Title: title, Tags: tags, Media: media})
+		photos = append(photos, Photo{ID: id, Title: title, Tags: tags, Media: media, ContentType: contentType})
 	}
 	return photos
 }
