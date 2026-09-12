@@ -56,13 +56,37 @@ func haversineKM(lat1, lon1, lat2, lon2 float64) float64 {
 	return earthRadiusKM * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 }
 
-func isPrivateGeoZone(lat, lon float64) bool {
+// matchedPrivateZone returns the name of the privateGeoZones entry the
+// coordinates fall inside, or "" if none match.
+func matchedPrivateZone(lat, lon float64) string {
 	for _, zone := range privateGeoZones {
 		if haversineKM(lat, lon, zone.lat, zone.lon) <= zone.radiusKM {
-			return true
+			return zone.name
 		}
 	}
-	return false
+	return ""
+}
+
+func isPrivateGeoZone(lat, lon float64) bool {
+	return matchedPrivateZone(lat, lon) != ""
+}
+
+// DescribeGeoPrivacy reports, for logging, why BuildMapEmbedURL did or
+// didn't show a photo's map: "shown", "hidden:<zone name>" for a private
+// zone, or "invalid" for unparsable coordinates.
+func DescribeGeoPrivacy(lat, lon string) string {
+	latF, err := strconv.ParseFloat(lat, 64)
+	if err != nil {
+		return "invalid"
+	}
+	lonF, err := strconv.ParseFloat(lon, 64)
+	if err != nil {
+		return "invalid"
+	}
+	if zone := matchedPrivateZone(latF, lonF); zone != "" {
+		return "hidden:" + zone
+	}
+	return "shown"
 }
 
 // BuildMapEmbedURL builds an OpenStreetMap embed URL (no API key needed,
@@ -335,6 +359,7 @@ func finishPublish(reader Reader, writer Writer, publisher Publisher, store stat
 	var mapEmbedURL string
 	if lat, lon, hasGeo, geoErr := reader.GetPhotoGeo(photo.ID); geoErr == nil && hasGeo {
 		mapEmbedURL, _ = BuildMapEmbedURL(lat, lon)
+		fmt.Printf("%s\t%s\tgeo=%s,%s\tmap=%s\n", time.Now().Format("15:04:05"), photo.ID, lat, lon, DescribeGeoPrivacy(lat, lon))
 	}
 
 	var pageViews string

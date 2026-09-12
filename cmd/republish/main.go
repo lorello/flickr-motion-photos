@@ -150,6 +150,7 @@ func main() {
 		var mapEmbedURL string
 		if lat, lon, hasGeo, geoErr := client.GetPhotoGeo(photoID); geoErr == nil && hasGeo {
 			mapEmbedURL, _ = scanner.BuildMapEmbedURL(lat, lon)
+			fmt.Printf("geo photo=%s lat=%s lon=%s map=%s\n", photoID, lat, lon, scanner.DescribeGeoPrivacy(lat, lon))
 		}
 
 		videoURL := r2PublicBaseURL + "/" + key + ".mp4"

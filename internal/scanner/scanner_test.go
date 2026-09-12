@@ -434,6 +434,24 @@ func TestBuildMapEmbedURLOmitsMapNearHomeAndVacationSpot(t *testing.T) {
 	}
 }
 
+func TestDescribeGeoPrivacyReportsShownHiddenOrInvalid(t *testing.T) {
+	cases := []struct {
+		name     string
+		lat, lon string
+		want     string
+	}{
+		{"home", "43.7139", "10.6459", "hidden:home (Vicopisano, Pisa)"},
+		{"vacation", "39.1800", "9.6360", "hidden:vacation (Costa Rei)"},
+		{"elsewhere", "45.4642", "9.1900", "shown"},
+		{"invalid", "not-a-number", "9.1900", "invalid"},
+	}
+	for _, tc := range cases {
+		if got := DescribeGeoPrivacy(tc.lat, tc.lon); got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestBuildMapEmbedURLShowsMapElsewhere(t *testing.T) {
 	url, err := BuildMapEmbedURL("45.4642", "9.1900") // Milano
 	if err != nil {
