@@ -225,6 +225,12 @@ type Photo struct {
 	ID    string
 	Title string
 	Tags  []string
+	// Media is "photo" or "video" (Flickr's own extras=media field). A
+	// genuine Flickr video upload can never be a Pixel Motion Photo (which
+	// is a JPEG with an embedded clip, media=="photo") — filtering these
+	// out before attempting a download avoids a guaranteed-to-fail
+	// original-file request (confirmed live: Flickr's CDN 500s on it).
+	Media string
 }
 
 // Client parla con l'API REST di Flickr. Se AccessToken/AccessTokenSecret
@@ -601,7 +607,7 @@ func (c *Client) FindUserIDByUsername(username string) (string, error) {
 func (c *Client) GetPhotosPage(userID string, page, perPage int) ([]Photo, error) {
 	params := map[string]string{
 		"user_id":  userID,
-		"extras":   "tags",
+		"extras":   "tags,media",
 		"page":     strconv.Itoa(page),
 		"per_page": strconv.Itoa(perPage),
 	}
@@ -617,7 +623,7 @@ func (c *Client) GetPhotosPage(userID string, page, perPage int) ([]Photo, error
 func (c *Client) GetPhotosetPhotos(photosetID string, page, perPage int) ([]Photo, error) {
 	params := map[string]string{
 		"photoset_id": photosetID,
-		"extras":      "tags",
+		"extras":      "tags,media",
 		"page":        strconv.Itoa(page),
 		"per_page":    strconv.Itoa(perPage),
 	}
@@ -651,7 +657,8 @@ func (c *Client) GetPhoto(photoID string) (Photo, error) {
 		}
 	}
 
-	return Photo{ID: photoID, Title: title, Tags: tags}, nil
+	media, _ := info["media"].(string)
+	return Photo{ID: photoID, Title: title, Tags: tags, Media: media}, nil
 }
 
 func parsePhotoList(container map[string]interface{}) []Photo {
@@ -662,11 +669,12 @@ func parsePhotoList(container map[string]interface{}) []Photo {
 		id, _ := p["id"].(string)
 		title, _ := p["title"].(string)
 		rawTags, _ := p["tags"].(string)
+		media, _ := p["media"].(string)
 		tags := []string{}
 		if rawTags != "" {
 			tags = strings.Split(rawTags, " ")
 		}
-		photos = append(photos, Photo{ID: id, Title: title, Tags: tags})
+		photos = append(photos, Photo{ID: id, Title: title, Tags: tags, Media: media})
 	}
 	return photos
 }

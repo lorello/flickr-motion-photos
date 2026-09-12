@@ -149,7 +149,8 @@ func alreadyTagged(tags []string) bool {
 }
 
 // ProcessPhoto valuta una singola foto. Ritorna uno status descrittivo:
-// "skipped" (già nota, da Flickr tag o da cache locale), "checked"/"lost"/
+// "skipped" (già nota, da Flickr tag, da cache locale, o perché è un video
+// Flickr nativo — mai una Motion Photo), "checked"/"lost"/
 // "published" (esito del rilevamento — include public, friends e family:
 // vedi IsFullyPrivate), "blocked-no-oauth" quando l'originale non è
 // scaricabile senza un access token OAuth, "download-error" per un
@@ -163,6 +164,15 @@ func alreadyTagged(tags []string) bool {
 func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Publisher, store statestore.Store, template, username string, photo flickrclient.Photo) (status string, viewerURL string, err error) {
 	if alreadyTagged(photo.Tags) {
 		return "skipped(flickr-tag)", "", nil
+	}
+
+	// A genuine Flickr video upload (media=="video") can never be a Pixel
+	// Motion Photo (JPEG with an embedded clip, media=="photo") — skip
+	// before attempting a download that's guaranteed to fail. Free to
+	// check: Media comes from the listing call itself, no extra API cost.
+	// Not cached/tagged: this comes from the listing every run regardless.
+	if photo.Media == "video" {
+		return "skipped(video)", "", nil
 	}
 
 	if rec, ok := store.Get(photo.ID); ok {

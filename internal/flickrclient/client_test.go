@@ -81,8 +81,8 @@ func TestGetPhotosPageExtractsIDTitleTagsWithoutPrivacyFilterWhenAnonymous(t *te
 			"stat": "ok",
 			"photos": map[string]interface{}{
 				"photo": []interface{}{
-					map[string]interface{}{"id": "111", "title": "PXL_1.MP", "tags": "flickrmp:status=checked vacation"},
-					map[string]interface{}{"id": "222", "title": "PXL_2.MP", "tags": ""},
+					map[string]interface{}{"id": "111", "title": "PXL_1.MP", "tags": "flickrmp:status=checked vacation", "media": "photo"},
+					map[string]interface{}{"id": "222", "title": "PXL_2.MP", "tags": "", "media": "video"},
 				},
 			},
 		}), nil
@@ -93,11 +93,14 @@ func TestGetPhotosPageExtractsIDTitleTagsWithoutPrivacyFilterWhenAnonymous(t *te
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []Photo{
-		{ID: "111", Title: "PXL_1.MP", Tags: []string{"flickrmp:status=checked", "vacation"}},
-		{ID: "222", Title: "PXL_2.MP", Tags: []string{}},
+		{ID: "111", Title: "PXL_1.MP", Tags: []string{"flickrmp:status=checked", "vacation"}, Media: "photo"},
+		{ID: "222", Title: "PXL_2.MP", Tags: []string{}, Media: "video"},
 	}
 	if !reflect.DeepEqual(photos, want) {
 		t.Fatalf("got %+v, want %+v", photos, want)
+	}
+	if capturedParams["extras"] != "tags,media" {
+		t.Fatalf("expected extras to include media, got %q", capturedParams["extras"])
 	}
 	if _, ok := capturedParams["privacy_filter"]; ok {
 		t.Fatalf("expected no privacy_filter param when unauthenticated, got %q", capturedParams["privacy_filter"])
@@ -793,6 +796,7 @@ func TestGetPhotoExtractsTitleAndRawTags(t *testing.T) {
 			"stat": "ok",
 			"photo": map[string]interface{}{
 				"title": map[string]interface{}{"_content": "PXL_1.MP"},
+				"media": "photo",
 				"tags": map[string]interface{}{
 					"tag": []interface{}{
 						map[string]interface{}{"raw": "flickrmp:status=published", "_content": "flickrmpstatuspublished"},
@@ -807,7 +811,7 @@ func TestGetPhotoExtractsTitleAndRawTags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := Photo{ID: "999", Title: "PXL_1.MP", Tags: []string{"flickrmp:status=published", "vacation"}}
+	want := Photo{ID: "999", Title: "PXL_1.MP", Tags: []string{"flickrmp:status=published", "vacation"}, Media: "photo"}
 	if !reflect.DeepEqual(photo, want) {
 		t.Fatalf("got %+v, want %+v", photo, want)
 	}

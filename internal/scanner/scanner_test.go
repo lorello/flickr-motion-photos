@@ -119,6 +119,23 @@ func TestProcessPhotoSkipsIfAlreadyInCache(t *testing.T) {
 	}
 }
 
+func TestProcessPhotoSkipsNativeFlickrVideoWithoutDownloading(t *testing.T) {
+	reader := &fakeReader{originalErr: fmt.Errorf("should never be called for a native video")}
+	photo := flickrclient.Photo{ID: "2b", Title: "t", Media: "video"}
+	store := newFakeStore(t)
+
+	status, _, err := ProcessPhoto(reader, &fakeWriter{}, &fakeUploader{}, &fakePublisher{}, store, testTemplate, testUsername, photo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != "skipped(video)" {
+		t.Fatalf("got %s", status)
+	}
+	if _, ok := store.Get("2b"); ok {
+		t.Fatal("expected no cache entry for a native video skip")
+	}
+}
+
 func TestProcessPhotoBlockedWithoutOAuthDoesNotError(t *testing.T) {
 	reader := &fakeReader{originalErr: fmt.Errorf("foto 3 (candownload=0): %w", flickrclient.ErrOriginalNotAvailable)}
 	photo := flickrclient.Photo{ID: "3", Title: "t"}
