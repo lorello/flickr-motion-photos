@@ -31,6 +31,8 @@ func main() {
 	photosetID := flag.String("photoset-id", "", "If set, scan only this album instead of the whole photostream")
 	photoIDs := flag.String("photo-ids", "", "Comma-separated list of specific Flickr photo IDs to process, instead of scanning the whole photostream/photoset")
 	force := flag.Bool("force", false, "With --photo-ids: clear the flickrmp:status Flickr tag and the local cache entry first, forcing reprocessing even if already published/checked/lost")
+	motionSince := flag.String("motion-since", "", "Whole-photostream scan only: YYYY-MM-DD, no motion photos were uploaded before this date; overrides (and replaces) the cutoff derived from the cache")
+	full := flag.Bool("full", false, "Ignore the last complete scan and rescan everything back to the cutoff")
 	dryRun := flag.Bool("dry-run", false, "Simulate Flickr description/tag writes instead of writing for real")
 	flag.Parse()
 
@@ -188,8 +190,63 @@ func main() {
 		return
 	}
 
+	meta, err := statestore.LoadMeta(*cacheDir, userID)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error opening scan meta:", err)
+		os.Exit(1)
+	}
+	if *motionSince != "" {
+		t, err := time.Parse("2006-01-02", *motionSince)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "invalid --motion-since (want YYYY-MM-DD):", err)
+			os.Exit(1)
+		}
+		meta.Cutoff = t
+		if err := meta.Save(); err != nil {
+			fmt.Fprintln(os.Stderr, "error saving scan meta:", err)
+			os.Exit(1)
+		}
+	} else if meta.Cutoff.IsZero() {
+		cutoff, err := scanner.DeriveCutoff(store, client)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error deriving scan cutoff:", err)
+			os.Exit(1)
+		}
+		meta.Cutoff = cutoff
+		if !cutoff.IsZero() {
+			fmt.Fprintf(os.Stderr, "[INFO] scan cutoff derived from oldest known motion photo: %s (saved in %s)\n", cutoff.Format("2006-01-02"), meta.Path())
+			if err := meta.Save(); err != nil {
+				fmt.Fprintln(os.Stderr, "error saving scan meta:", err)
+				os.Exit(1)
+			}
+		}
+	}
+	scanMeta := *meta
+	if *full {
+		scanMeta.LastCompleteScan = time.Time{}
+	}
+	client.MinUploadDate = scanMeta.Since()
+	if client.MinUploadDate.IsZero() {
+		fmt.Fprintln(os.Stderr, "[INFO] scan depth: whole photostream (no cutoff known)")
+	} else {
+		fmt.Fprintf(os.Stderr, "[INFO] scan depth: photos uploaded since %s (cutoff %s, last complete scan %s)\n",
+			client.MinUploadDate.Format("2006-01-02"), meta.Cutoff.Format("2006-01-02"), meta.LastCompleteScan.Format("2006-01-02 15:04"))
+	}
+
+	runStart := time.Now()
 	if err := scanner.Run(client, writer, uploader, publisher, store, userID, *username, string(templateBytes), *limit); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
+	}
+
+	// Solo un run che ha percorso tutta la sua finestra, davvero (non
+	// --dry-run, non fermato da --limit), sposta in avanti la finestra
+	// del prossimo.
+	if !*dryRun && *limit < 0 {
+		meta.LastCompleteScan = runStart
+		if err := meta.Save(); err != nil {
+			fmt.Fprintln(os.Stderr, "error saving scan meta:", err)
+			os.Exit(1)
+		}
 	}
 }

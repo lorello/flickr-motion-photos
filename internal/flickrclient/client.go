@@ -54,6 +54,10 @@ var licenseURLs = map[string]string{
 
 const apiURL = "https://api.flickr.com/services/rest"
 
+// flickroauthHTTPClient ha un timeout esplicito: http.Get (DefaultClient)
+// non ne ha, e una connessione appesa ha bloccato lo scan per ~7.5h.
+var flickroauthHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 // ErrOriginalNotAvailable segnala che Flickr non espone originalsecret/
 // originalformat per questa foto — richiede un client autenticato come
 // owner (OAuth), a prescindere dal fatto che la foto sia pubblica.
@@ -62,7 +66,7 @@ var ErrOriginalNotAvailable = errors.New("original not available: owner-authenti
 // signedGetFunc, unsignedGetFunc e httpGetFunc permettono ai test di
 // sostituire il livello HTTP.
 var signedGetFunc = flickroauth.SignedGet
-var httpGetFunc = http.Get
+var httpGetFunc = flickroauthHTTPClient.Get
 
 // downloadOriginalFunc scarica i byte dell'originale da live.staticflickr.com.
 // Implementazione di default: shell out a curl invece del client HTTP nativo
@@ -218,6 +222,8 @@ var unsignedGetFunc = func(rawURL string, params map[string]string) (string, err
 
 type APIError struct {
 	Message string
+	// Code is Flickr's numeric error code (0 if absent).
+	Code int
 }
 
 func (e *APIError) Error() string { return e.Message }
@@ -249,6 +255,10 @@ type Client struct {
 	ConsumerSecret    string
 	AccessToken       string
 	AccessTokenSecret string
+
+	// MinUploadDate, se non zero, limita GetPhotosPage alle foto caricate
+	// da quella data in poi (min_upload_date di flickr.people.getPhotos).
+	MinUploadDate time.Time
 
 	photoInfoMu    sync.Mutex
 	photoInfoCache map[string]photoInfoCacheEntry
@@ -283,7 +293,36 @@ func (c *Client) Authenticated() bool {
 	return c.AccessToken != "" && c.AccessTokenSecret != ""
 }
 
+// Call esegue una chiamata REST con retry sugli errori transitori
+// (rete, risposta non-JSON, Flickr 105 "service unavailable") e circuit
+// breaker process-wide: vedi resilience.go. Gli errori applicativi di
+// Flickr (foto non trovata, permessi, ...) non vengono ritentati.
 func (c *Client) Call(method string, params map[string]string) (map[string]interface{}, error) {
+	if err := apiBreaker.allow(); err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	var err error
+	for attempt := 1; attempt <= maxCallAttempts; attempt++ {
+		result, err = c.callOnce(method, params)
+		if err == nil || !isTransient(err) {
+			// Un APIError "normale" significa che Flickr risponde: non
+			// conta come fallimento per il breaker.
+			apiBreaker.record(true)
+			return result, err
+		}
+		if attempt < maxCallAttempts {
+			delay := retryBaseDelay << (attempt - 1)
+			fmt.Fprintf(os.Stderr, "[%s] [RETRY] %s attempt %d/%d failed: %v (retry in %s)\n",
+				time.Now().Format("15:04:05"), method, attempt, maxCallAttempts, err, delay)
+			sleepFunc(delay)
+		}
+	}
+	apiBreaker.record(false)
+	return nil, err
+}
+
+func (c *Client) callOnce(method string, params map[string]string) (map[string]interface{}, error) {
 	restCallPacer.wait()
 
 	var body string
@@ -311,19 +350,20 @@ func (c *Client) Call(method string, params map[string]string) (map[string]inter
 		body, err = unsignedGetFunc(apiURL, full)
 	}
 	if err != nil {
-		return nil, err
+		return nil, &transientError{err: err}
 	}
 
 	var result map[string]interface{}
 	if err := json.Unmarshal([]byte(body), &result); err != nil {
-		return nil, err
+		return nil, &transientError{err: fmt.Errorf("invalid JSON from Flickr: %w", err)}
 	}
 	if stat, _ := result["stat"].(string); stat != "ok" {
 		msg, _ := result["message"].(string)
 		if msg == "" {
 			msg = "unknown Flickr API error"
 		}
-		return nil, &APIError{Message: msg}
+		code, _ := result["code"].(float64)
+		return nil, &APIError{Message: msg, Code: int(code)}
 	}
 	return result, nil
 }
@@ -843,12 +883,29 @@ func (c *Client) GetPhotosPage(userID string, page, perPage int) ([]Photo, error
 		"page":     strconv.Itoa(page),
 		"per_page": strconv.Itoa(perPage),
 	}
+	if !c.MinUploadDate.IsZero() {
+		params["min_upload_date"] = strconv.FormatInt(c.MinUploadDate.Unix(), 10)
+	}
 	result, err := c.Call("flickr.people.getPhotos", params)
 	if err != nil {
 		return nil, err
 	}
 	photosObj, _ := result["photos"].(map[string]interface{})
 	return parsePhotoList(photosObj), nil
+}
+
+// PhotoUploadTime ritorna quando la foto è stata caricata su Flickr.
+func (c *Client) PhotoUploadTime(photoID string) (time.Time, error) {
+	info, err := c.getPhotoInfo(photoID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	raw, _ := info["dateuploaded"].(string)
+	secs, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("photo %s: no valid dateuploaded in getInfo: %w", photoID, err)
+	}
+	return time.Unix(secs, 0), nil
 }
 
 // GetPhotosetPhotos restituisce le foto di un album (photoset) specifico.

@@ -22,8 +22,14 @@ const (
 	nonceAlphabet   = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 )
 
+// httpTimeout copre connessione + lettura del body. http.Get (DefaultClient)
+// non ha timeout: una connessione appesa blocca il processo per ore.
+const httpTimeout = 30 * time.Second
+
+var httpClient = &http.Client{Timeout: httpTimeout}
+
 // httpGetFunc permette ai test di sostituire la richiesta HTTP reale.
-var httpGetFunc = http.Get
+var httpGetFunc = httpClient.Get
 
 func isUnreserved(c byte) bool {
 	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||

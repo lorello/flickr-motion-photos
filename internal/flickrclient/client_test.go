@@ -903,3 +903,25 @@ func TestGetPhotoExtractsTitleAndRawTags(t *testing.T) {
 		t.Fatalf("got %+v, want %+v", photo, want)
 	}
 }
+
+func TestGetPhotosPageSendsMinUploadDateWhenSet(t *testing.T) {
+	var got map[string]string
+	withUnsignedGet(t, func(_ string, params map[string]string) (string, error) {
+		got = params
+		return `{"stat":"ok","photos":{"photo":[]}}`, nil
+	})
+	client := makeClient()
+	if _, err := client.GetPhotosPage("u", 1, 100); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["min_upload_date"]; ok {
+		t.Fatal("min_upload_date must be absent when MinUploadDate is zero")
+	}
+	client.MinUploadDate = time.Unix(1600000000, 0)
+	if _, err := client.GetPhotosPage("u", 1, 100); err != nil {
+		t.Fatal(err)
+	}
+	if got["min_upload_date"] != "1600000000" {
+		t.Fatalf("min_upload_date = %q, want 1600000000", got["min_upload_date"])
+	}
+}
