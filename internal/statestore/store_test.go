@@ -1,7 +1,6 @@
 package statestore
 
 import (
-	"sort"
 	"testing"
 )
 
@@ -67,19 +66,56 @@ func TestDifferentUserIDsUseDifferentFiles(t *testing.T) {
 	}
 }
 
-func TestPhotoIDsByStatusFiltersCorrectly(t *testing.T) {
+func TestRecordsByStatusFiltersCorrectlyAndKeepsToken(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir, "user")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	store.Set("1", Record{Status: "published", Token: "abc123"})
+	store.Set("2", Record{Status: "checked"})
+	store.Set("3", Record{Status: "published", Token: "def456"})
+
+	records := store.RecordsByStatus("published")
+	if len(records) != 2 {
+		t.Fatalf("got %d records, want 2: %+v", len(records), records)
+	}
+	if records["1"].Token != "abc123" || records["3"].Token != "def456" {
+		t.Fatalf("unexpected tokens: %+v", records)
+	}
+}
+
+func TestDeleteRemovesEntryAndPersists(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewFileStore(dir, "user")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	store.Set("1", Record{Status: "published"})
-	store.Set("2", Record{Status: "checked"})
-	store.Set("3", Record{Status: "published"})
 
-	ids := store.PhotoIDsByStatus("published")
-	sort.Strings(ids)
-	if len(ids) != 2 || ids[0] != "1" || ids[1] != "3" {
-		t.Fatalf("got %v", ids)
+	if err := store.Delete("1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := store.Get("1"); ok {
+		t.Fatal("expected record to be gone after Delete")
+	}
+
+	reopened, err := NewFileStore(dir, "user")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := reopened.Get("1"); ok {
+		t.Fatal("expected deletion to persist across reopen")
+	}
+}
+
+func TestDeleteOfUnknownIDIsNoOp(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewFileStore(dir, "user")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := store.Delete("nonexistent"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -10,295 +10,7 @@
   window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
   plausible.init()
 </script>
-<style>
-  :root { color-scheme: dark; }
-  body {
-    margin: 0;
-    background: #000;
-    color: #fff;
-    font-family: "Proxima Nova", "helvetica neue", helvetica, arial, sans-serif;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    min-height: 100vh;
-  }
-  .brandbar {
-    width: 100%;
-    background: #128fdc;
-    color: #fff;
-    font-weight: 700;
-    font-size: 0.85rem;
-    letter-spacing: 0.02em;
-    text-align: center;
-    padding: 6px 12px;
-    box-sizing: border-box;
-  }
-  header {
-    width: 100%;
-    max-width: 1200px;
-    padding: 16px 24px;
-    box-sizing: border-box;
-  }
-  header a.back {
-    color: #128fdc;
-    text-decoration: none;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-  main {
-    display: flex;
-    flex: 1;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    padding: 0 16px;
-    box-sizing: border-box;
-  }
-  .stage {
-    position: relative;
-    max-width: 100%;
-  }
-  .stage img, .stage video {
-    max-width: 100%;
-    max-height: 76vh;
-    display: block;
-  }
-  .stage video {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-  }
-  .iconrow {
-    width: 100%;
-    max-width: 1200px;
-    padding: 10px 24px;
-    box-sizing: border-box;
-    display: flex;
-    justify-content: flex-end;
-    gap: 20px;
-  }
-  .iconrow button {
-    background: none;
-    border: none;
-    color: #fff;
-    font-size: 1.1rem;
-    line-height: 1;
-    cursor: pointer;
-    padding: 6px;
-    opacity: 0.8;
-  }
-  .iconrow button:hover {
-    opacity: 1;
-  }
-  .iconrow button.active {
-    color: #128fdc;
-    opacity: 1;
-  }
-  .content {
-    width: 100%;
-    background: #f3f5f6;
-    color: #222;
-  }
-  .content-inner {
-    width: 100%;
-    max-width: 700px;
-    margin: 0 auto;
-    padding: 20px 24px 8px;
-    box-sizing: border-box;
-    text-align: left;
-  }
-  .owner {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-    margin-bottom: 16px;
-  }
-  .owner img {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    display: block;
-    flex: none;
-  }
-  .owner span {
-    color: #222;
-    font-weight: 700;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  h1 {
-    font-size: 1.15rem;
-    font-weight: 700;
-    color: #222;
-    margin: 0 0 10px;
-  }
-  .description {
-    font-size: 0.9rem;
-    line-height: 1.5;
-    color: #333;
-    margin: 0 0 14px;
-    white-space: pre-wrap;
-  }
-  .meta {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-bottom: 14px;
-  }
-  .badge {
-    display: inline-block;
-    background: #ff0084;
-    color: #fff;
-    font-size: 0.75rem;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-    padding: 3px 10px;
-    border-radius: 999px;
-  }
-  time {
-    color: #777;
-    font-size: 0.85rem;
-  }
-  .tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 14px;
-  }
-  .tag {
-    background: #e6e9eb;
-    color: #555;
-    font-size: 0.8rem;
-    padding: 4px 10px;
-    border-radius: 999px;
-  }
-  .stats {
-    display: flex;
-    gap: 14px;
-    font-size: 0.82rem;
-    color: #777;
-    margin-bottom: 14px;
-  }
-  .submeta {
-    font-size: 0.8rem;
-    color: #888;
-    margin-bottom: 14px;
-  }
-  .submeta a {
-    color: #128fdc;
-    text-decoration: none;
-  }
-  .section {
-    margin-bottom: 14px;
-  }
-  .section h2 {
-    font-size: 0.75rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    color: #999;
-    margin: 0 0 8px;
-  }
-  .pills {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-  .pill {
-    background: #e6e9eb;
-    color: #555;
-    font-size: 0.8rem;
-    padding: 4px 10px;
-    border-radius: 999px;
-  }
-  .mapwrap {
-    width: 100%;
-    max-width: 420px;
-    margin-bottom: 14px;
-  }
-  .mapwrap iframe {
-    width: 100%;
-    height: 220px;
-    border: 0;
-    border-radius: 4px;
-  }
-  .commentsrow {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 0;
-    border-top: 1px solid #e0e0e0;
-  }
-  .commentslabel {
-    font-size: 0.85rem;
-    font-weight: 700;
-    color: #222;
-  }
-  .addcomment {
-    display: inline-block;
-    background: #128fdc;
-    color: #fff;
-    font-size: 0.8rem;
-    font-weight: 700;
-    text-decoration: none;
-    padding: 6px 14px;
-    border-radius: 999px;
-  }
-  .addcomment:hover {
-    background: #0f7bbd;
-  }
-  .infopanel {
-    width: 100%;
-    max-width: 420px;
-    padding: 12px 0 4px;
-    box-sizing: border-box;
-  }
-  .infopanel table {
-    border-collapse: collapse;
-    font-size: 0.85rem;
-    width: 100%;
-  }
-  .infopanel th, .infopanel td {
-    text-align: left;
-    padding: 6px 0;
-    border-bottom: 1px solid #e0e0e0;
-  }
-  .infopanel th {
-    color: #777;
-    font-weight: 400;
-    width: 40%;
-  }
-  .infopanel td {
-    font-weight: 600;
-  }
-  .infopanel tr:last-child th, .infopanel tr:last-child td {
-    border-bottom: none;
-  }
-  footer {
-    padding: 16px 24px 24px;
-    text-align: left;
-  }
-  footer a {
-    color: #888;
-    font-size: 0.8rem;
-    text-decoration: none;
-  }
-  footer a:hover {
-    color: #555;
-    text-decoration: underline;
-  }
-  .disclaimer {
-    color: #999;
-    font-size: 0.72rem;
-    margin: 0 0 6px;
-  }
-</style>
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <div class="brandbar">Flickr Motion Photo Viewer</div>
@@ -317,67 +29,146 @@
   </div>
   <div class="content">
     <div class="content-inner">
-      {{if .OwnerName}}
-      <div class="owner">
-        <img src="{{.OwnerAvatarURL}}" alt="">
-        <span>{{.OwnerName}}</span>
+      <div class="col-left">
+
+        <div class="block">
+          {{if .OwnerName}}
+          <div class="owner">
+            <img src="{{.OwnerAvatarURL}}" alt="">
+            <span>{{.OwnerName}}</span>
+          </div>
+          {{end}}
+          <h1>{{.Title}}</h1>
+          <div class="meta">
+            <span class="badge">Motion Photo</span>
+            {{if .DateTaken}}<time>{{.DateTaken}}</time>{{end}}
+          </div>
+          {{if .OwnerDescription}}<p class="description">{{.OwnerDescription}}</p>{{end}}
+        </div>
+
+        <div class="block">
+          <div class="commentslabel">Comments ({{if .Comments}}{{.Comments}}{{else}}0{{end}})</div>
+          {{if .CommentList}}
+          <div class="commentlist">
+            {{range .CommentList}}
+            <div class="comment">
+              <img src="{{.IconURL}}" alt="">
+              <div class="body">
+                <a class="author" href="{{.ProfileURL}}">{{.Author}}</a>{{if .Date}}<span class="date">{{.Date}}</span>{{end}}
+                <p class="text">{{.Text}}</p>
+              </div>
+            </div>
+            {{end}}
+          </div>
+          {{end}}
+          <a class="addcomment" href="{{.PhotoPageURL}}">Add a comment</a>
+        </div>
+
       </div>
-      {{end}}
-      <h1>{{.Title}}</h1>
-      {{if .OwnerDescription}}<p class="description">{{.OwnerDescription}}</p>{{end}}
-      <div class="meta">
-        <span class="badge">Motion Photo</span>
-        {{if .DateTaken}}<time>{{.DateTaken}}</time>{{end}}
-      </div>
-      {{if or .Views .Favorites .Comments}}
-      <div class="stats">
-        {{if .Views}}<span>{{.Views}} views</span>{{end}}
-        {{if .Favorites}}<span>{{.Favorites}} faves</span>{{end}}
-        {{if .Comments}}<span>{{.Comments}} comments</span>{{end}}
-      </div>
-      {{end}}
-      {{if .Tags}}
-      <div class="tags">
-        {{range .Tags}}<span class="tag">{{.}}</span>{{end}}
-      </div>
-      {{end}}
-      {{if .Groups}}
-      <div class="section">
-        <h2>Groups</h2>
-        <div class="pills">{{range .Groups}}<span class="pill">{{.}}</span>{{end}}</div>
-      </div>
-      {{end}}
-      {{if .People}}
-      <div class="section">
-        <h2>People</h2>
-        <div class="pills">{{range .People}}<span class="pill">{{.}}</span>{{end}}</div>
-      </div>
-      {{end}}
-      {{if or .DateUploaded .LicenseName}}
-      <div class="submeta">
-        {{if .DateUploaded}}Uploaded {{.DateUploaded}}{{end}}
-        {{if .LicenseName}} · <a href="{{.LicenseURL}}">{{.LicenseName}}</a>{{end}}
-      </div>
-      {{end}}
-      {{if .MapEmbedURL}}
-      <div class="mapwrap">
-        <iframe src="{{.MapEmbedURL}}" loading="lazy" title="Photo location"></iframe>
-      </div>
-      {{end}}
-      {{if .Camera}}
-      <div class="infopanel">
-        <table>
-          {{if .Camera}}<tr><th>Camera</th><td>{{.Camera}}</td></tr>{{end}}
-          {{if .ExposureTime}}<tr><th>Exposure</th><td>{{.ExposureTime}}</td></tr>{{end}}
-          {{if .FNumber}}<tr><th>Aperture</th><td>{{.FNumber}}</td></tr>{{end}}
-          {{if .ISO}}<tr><th>ISO Speed</th><td>{{.ISO}}</td></tr>{{end}}
-          {{if .FocalLength}}<tr><th>Focal Length</th><td>{{.FocalLength}}</td></tr>{{end}}
-        </table>
-      </div>
-      {{end}}
-      <div class="commentsrow">
-        <span class="commentslabel">Comments ({{if .Comments}}{{.Comments}}{{else}}0{{end}})</span>
-        <a class="addcomment" href="{{.PhotoPageURL}}">Add a comment</a>
+      <div class="col-right">
+
+        <div class="block">
+          <div class="twocol">
+            <div class="stats">
+              {{if .Views}}<span><strong>{{.Views}}</strong> views</span>{{end}}
+              {{if .Favorites}}<span><strong>{{.Favorites}}</strong> faves</span>{{end}}
+              {{if .Comments}}<span><strong>{{.Comments}}</strong> comments</span>{{end}}
+              {{if .PageViews}}<span><strong>{{.PageViews}}</strong> page views</span>{{end}}
+            </div>
+            <div class="stats">
+              {{if .DateUploaded}}<span>Uploaded {{.DateUploaded}}</span>{{end}}
+              {{if .DateTaken}}<span>Taken {{.DateTaken}}</span>{{end}}
+              {{if .LicenseName}}<span><a href="{{.LicenseURL}}">{{.LicenseName}}</a></span>{{end}}
+            </div>
+          </div>
+        </div>
+
+        {{if or .Camera .MapEmbedURL .Groups .Albums}}
+        <div class="block">
+          {{if .Camera}}
+          <table class="infotable">
+            {{if .Camera}}<tr><th>Camera</th><td>{{.Camera}}</td></tr>{{end}}
+            {{if .ExposureTime}}<tr><th>Exposure</th><td>{{.ExposureTime}}</td></tr>{{end}}
+            {{if .FNumber}}<tr><th>Aperture</th><td>{{.FNumber}}</td></tr>{{end}}
+            {{if .ISO}}<tr><th>ISO Speed</th><td>{{.ISO}}</td></tr>{{end}}
+            {{if .FocalLength}}<tr><th>Focal Length</th><td>{{.FocalLength}}</td></tr>{{end}}
+          </table>
+          {{end}}
+          {{if .MapEmbedURL}}
+          <div class="mapwrap">
+            <iframe src="{{.MapEmbedURL}}" loading="lazy" title="Photo location"></iframe>
+          </div>
+          {{end}}
+          {{if .Groups}}
+          <h2 style="margin-top:14px">Groups</h2>
+          <div class="pillgrid">
+            {{range .Groups}}
+            <div class="item">
+              <img src="{{.IconURL}}" alt="">
+              <div>
+                <a href="{{.URL}}">{{.Title}}</a>
+                {{if .ItemCount}}<div class="count">{{.ItemCount}} items</div>{{end}}
+              </div>
+            </div>
+            {{end}}
+          </div>
+          {{end}}
+          {{if .Albums}}
+          <h2 style="margin-top:14px">Albums</h2>
+          <div class="albumgrid">
+            {{range .Albums}}
+            <div class="item">
+              <a href="{{.URL}}">
+                <img src="{{.CoverURL}}" alt="">
+                <div class="title">{{.Title}}</div>
+                <div class="count">{{.ItemCount}} items</div>
+              </a>
+            </div>
+            {{end}}
+          </div>
+          {{end}}
+        </div>
+        {{end}}
+
+        {{if or .Tags .People}}
+        <div class="block">
+          <div class="twocol">
+            <div>
+              {{if .Tags}}
+              <h2>Tags</h2>
+              <div class="tags">
+                {{range .Tags}}<span class="tag">{{.}}</span>{{end}}
+              </div>
+              {{end}}
+            </div>
+            <div>
+              {{if .People}}
+              <h2>People</h2>
+              <div class="pillgrid" style="grid-template-columns: 1fr">
+                {{range .People}}
+                <div class="item">
+                  <img src="{{.IconURL}}" alt="">
+                  <a href="{{.ProfileURL}}">{{.Username}}</a>
+                </div>
+                {{end}}
+              </div>
+              {{end}}
+            </div>
+          </div>
+        </div>
+        {{end}}
+
+        <div class="block">
+          <h2>Additional Information</h2>
+          <table class="infotable">
+            {{if .ViewPrivacy}}<tr><th>View privacy</th><td>{{.ViewPrivacy}}</td></tr>{{end}}
+            {{if .CommentPerm}}<tr><th>Who can comment</th><td>{{.CommentPerm}}</td></tr>{{end}}
+            {{if .AddMetaPerm}}<tr><th>Who can add tags/notes/people</th><td>{{.AddMetaPerm}}</td></tr>{{end}}
+            {{if .SafetyLevel}}<tr><th>Safety level</th><td>{{.SafetyLevel}}</td></tr>{{end}}
+            {{if .ContentType}}<tr><th>Content type</th><td>{{.ContentType}}</td></tr>{{end}}
+          </table>
+        </div>
+
       </div>
     </div>
     <footer>
@@ -385,46 +176,6 @@
       <a href="https://www.flickr.com/groups/utils/discuss/">Questions or bugs?</a>
     </footer>
   </div>
-  <script>
-  (function () {
-    var video = document.getElementById('video');
-    var playPauseBtn = document.getElementById('playPauseBtn');
-    var loopBtn = document.getElementById('loopBtn');
-
-    function showPaused() {
-      video.style.display = 'none';
-      playPauseBtn.innerHTML = '&#9654;';
-      playPauseBtn.setAttribute('aria-label', 'Play');
-    }
-    function showPlaying() {
-      video.style.display = '';
-      playPauseBtn.innerHTML = '&#10074;&#10074;';
-      playPauseBtn.setAttribute('aria-label', 'Pause');
-    }
-
-    playPauseBtn.addEventListener('click', function () {
-      if (video.style.display === 'none') {
-        video.currentTime = 0;
-        video.play();
-        showPlaying();
-      } else {
-        video.pause();
-        showPaused();
-      }
-    });
-
-    loopBtn.addEventListener('click', function () {
-      video.loop = !video.loop;
-      loopBtn.classList.toggle('active', video.loop);
-      loopBtn.setAttribute('aria-label', video.loop ? 'Turn off loop' : 'Turn on loop');
-    });
-
-    video.addEventListener('ended', function () {
-      if (!video.loop) {
-        showPaused();
-      }
-    });
-  })();
-  </script>
+  <script src="/script.js"></script>
 </body>
 </html>

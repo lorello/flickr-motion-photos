@@ -10,6 +10,37 @@ import (
 	"strings"
 )
 
+// GroupInfo, AlbumInfo, PersonInfo and CommentInfo are display-ready
+// mirrors of flickrclient's richer types — kept separate so this package
+// doesn't need to import flickrclient just to render a struct's fields.
+type GroupInfo struct {
+	Title     string
+	IconURL   string
+	URL       string
+	ItemCount int
+}
+
+type AlbumInfo struct {
+	Title     string
+	CoverURL  string
+	URL       string
+	ItemCount int
+}
+
+type PersonInfo struct {
+	Username   string
+	IconURL    string
+	ProfileURL string
+}
+
+type CommentInfo struct {
+	Author     string
+	IconURL    string
+	ProfileURL string
+	Text       string
+	Date       string
+}
+
 type PageData struct {
 	PhotoID          string
 	Title            string
@@ -23,18 +54,26 @@ type PageData struct {
 	DateUploaded     string
 	Tags             []string
 	Views            string
-	Comments         string
+	PageViews        string // Plausible pageviews on this viewer page itself (distinct from Flickr's own Views), optional
+	Comments         string // total comment count (for the count badge); the actual list is CommentList
+	CommentList      []CommentInfo
 	Favorites        string
 	LicenseName      string
 	LicenseURL       string
 	MapEmbedURL      string // pre-built OpenStreetMap embed URL, empty if the photo isn't geotagged (see scanner for how it's built)
-	Groups           []string
-	People           []string
+	Groups           []GroupInfo
+	Albums           []AlbumInfo
+	People           []PersonInfo
 	Camera           string
 	ExposureTime     string
 	FNumber          string
 	ISO              string
 	FocalLength      string
+	ContentType      string // "Photo" | "Screenshot" | "Other"
+	SafetyLevel      string // "Safe" | "Moderate" | "Restricted"
+	ViewPrivacy      string // "Public" | "Friends" | "Family" | "Friends & Family" | "Only you"
+	CommentPerm      string // who can comment
+	AddMetaPerm      string // who can add tags/notes/people
 }
 
 // RenderPhotoPage renders template against data using html/template, which

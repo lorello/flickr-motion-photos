@@ -20,7 +20,17 @@ import (
 // Record è quello che sappiamo su una foto già processata in un run
 // precedente.
 type Record struct {
-	Status string `json:"status"` // "checked" | "published" | "lost"
+	Status string `json:"status"` // "checked" | "published" | "lost" | "ready-private"
+	// VideoURL è popolato solo per "ready-private": il video è già stato
+	// estratto e caricato su R2 mentre la foto era ancora privata, così
+	// quando diventerà pubblica non serve riscaricare l'originale da
+	// Flickr (costoso, soggetto a rate limit) per finire la pubblicazione.
+	VideoURL string `json:"video_url,omitempty"`
+	// Token è la chiave R2 casuale (non l'ID Flickr, indovinabile) usata
+	// per il video e la pagina di questa foto — generato una sola volta e
+	// riusato da ogni run successivo (incluso cmd/republish) così il link
+	// già condiviso in descrizione non cambia mai.
+	Token string `json:"token,omitempty"`
 }
 
 // Store è l'interfaccia consumata dallo scanner: get/set per photo ID.
@@ -28,6 +38,12 @@ type Record struct {
 type Store interface {
 	Get(photoID string) (Record, bool)
 	Set(photoID string, r Record) error
+	// Delete rimuove la voce di photoID, se presente (no-op altrimenti) —
+	// usato per far rielaborare da capo una foto (es. video orfano su R2:
+	// il tag Flickr viene rimosso e la cache locale deve seguirlo, non
+	// basta sovrascrivere lo status: qualunque Record esistente, tranne
+	// "ready-private", fa scattare "skipped(cache)" in ProcessPhoto).
+	Delete(photoID string) error
 }
 
 // FileStore è l'implementazione attuale: un file JSON in /tmp, con nome
@@ -74,22 +90,38 @@ func (s *FileStore) Set(photoID string, r Record) error {
 	return os.WriteFile(s.path, raw, 0o644)
 }
 
+func (s *FileStore) Delete(photoID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.data[photoID]; !ok {
+		return nil
+	}
+	delete(s.data, photoID)
+	raw, err := json.MarshalIndent(s.data, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.path, raw, 0o644)
+}
+
 // Path espone il file su disco (utile per log/debug).
 func (s *FileStore) Path() string {
 	return s.path
 }
 
-// PhotoIDsByStatus ritorna gli ID delle foto in cache con lo status dato
-// (es. "published"), per strumenti di manutenzione (es. cmd/republish) che
-// devono rielaborare tutte le foto già pubblicate senza rifare la scansione.
-func (s *FileStore) PhotoIDsByStatus(status string) []string {
+// RecordsByStatus ritorna, indicizzati per photo ID, i record in cache con
+// lo status dato (es. "published"), per strumenti di manutenzione (es.
+// cmd/republish) che devono rielaborare tutte le foto già pubblicate senza
+// rifare la scansione — serve l'intero Record (non solo l'ID) per poter
+// riusare lo stesso Token già assegnato, invece di generarne uno nuovo.
+func (s *FileStore) RecordsByStatus(status string) map[string]Record {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ids := make([]string, 0, len(s.data))
+	out := make(map[string]Record)
 	for id, r := range s.data {
 		if r.Status == status {
-			ids = append(ids, id)
+			out[id] = r
 		}
 	}
-	return ids
+	return out
 }

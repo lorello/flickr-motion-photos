@@ -3,10 +3,22 @@ package flickrclient
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"reflect"
 	"testing"
 	"time"
 )
+
+// TestMain makes sleepFunc a no-op by default for the whole package's test
+// run — without it, every Call() paces itself via restCallPacer using the
+// real time.Sleep, and the many tests here that call Call() repeatedly
+// turn into a 40+ second suite for no reason. Tests that need to verify
+// an actual sleep duration override sleepFunc themselves (existing
+// pattern, e.g. the cdnCooldown tests) and restore it via t.Cleanup.
+func TestMain(m *testing.M) {
+	sleepFunc = func(time.Duration) {}
+	os.Exit(m.Run())
+}
 
 func makeClient() *Client {
 	return NewClient("ck", "cs", "", "")
@@ -69,8 +81,8 @@ func TestGetPhotosPageExtractsIDTitleTagsWithoutPrivacyFilterWhenAnonymous(t *te
 			"stat": "ok",
 			"photos": map[string]interface{}{
 				"photo": []interface{}{
-					map[string]interface{}{"id": "111", "title": "PXL_1.MP", "tags": "flickrmp:status=checked vacation"},
-					map[string]interface{}{"id": "222", "title": "PXL_2.MP", "tags": ""},
+					map[string]interface{}{"id": "111", "title": "PXL_1.MP", "tags": "flickrmp:status=checked vacation", "media": "photo"},
+					map[string]interface{}{"id": "222", "title": "PXL_2.MP", "tags": "", "media": "video"},
 				},
 			},
 		}), nil
@@ -81,11 +93,14 @@ func TestGetPhotosPageExtractsIDTitleTagsWithoutPrivacyFilterWhenAnonymous(t *te
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []Photo{
-		{ID: "111", Title: "PXL_1.MP", Tags: []string{"flickrmp:status=checked", "vacation"}},
-		{ID: "222", Title: "PXL_2.MP", Tags: []string{}},
+		{ID: "111", Title: "PXL_1.MP", Tags: []string{"flickrmp:status=checked", "vacation"}, Media: "photo"},
+		{ID: "222", Title: "PXL_2.MP", Tags: []string{}, Media: "video"},
 	}
 	if !reflect.DeepEqual(photos, want) {
 		t.Fatalf("got %+v, want %+v", photos, want)
+	}
+	if capturedParams["extras"] != "tags,media,content_type" {
+		t.Fatalf("expected extras to include media, got %q", capturedParams["extras"])
 	}
 	if _, ok := capturedParams["privacy_filter"]; ok {
 		t.Fatalf("expected no privacy_filter param when unauthenticated, got %q", capturedParams["privacy_filter"])
@@ -187,7 +202,7 @@ func TestGetPhotoOriginalBytesFailsOnNonOKStatus(t *testing.T) {
 
 func TestCdnCooldownWaitsUntilBlockedUntilElapses(t *testing.T) {
 	c := &cdnCooldown{nextBackoff: time.Minute}
-	c.recordRateLimited() // sets blockedUntil ~1 minute out
+	c.recordRateLimited("https://example.com/test.jpg") // sets blockedUntil ~1 minute out
 
 	var slept time.Duration
 	orig := sleepFunc
@@ -217,13 +232,13 @@ func TestCdnCooldownDoesNotWaitWhenNotBlocked(t *testing.T) {
 func TestCdnCooldownBackoffEscalatesAndResetsOnSuccess(t *testing.T) {
 	c := &cdnCooldown{nextBackoff: time.Minute}
 
-	c.recordRateLimited()
+	c.recordRateLimited("https://example.com/test.jpg")
 	firstBackoff := c.nextBackoff
 	if firstBackoff != 2*time.Minute {
 		t.Fatalf("expected backoff to double to 2m after first rate limit, got %v", firstBackoff)
 	}
 
-	c.recordRateLimited()
+	c.recordRateLimited("https://example.com/test.jpg")
 	if c.nextBackoff != 4*time.Minute {
 		t.Fatalf("expected backoff to double to 4m after second rate limit, got %v", c.nextBackoff)
 	}
@@ -467,8 +482,8 @@ func TestGetPhotoGroupsExtractsPoolTitles(t *testing.T) {
 		return jsonBody(map[string]interface{}{
 			"stat": "ok",
 			"pool": []interface{}{
-				map[string]interface{}{"title": "Sunsets"},
-				map[string]interface{}{"title": "Nature"},
+				map[string]interface{}{"id": "111@N01", "title": "Sunsets", "iconserver": "5", "iconfarm": 6.0, "pool_count": "74045", "url": "/groups/sunsetlovers/pool/"},
+				map[string]interface{}{"id": "222@N01", "title": "Nature"},
 			},
 		}), nil
 	})
@@ -477,8 +492,26 @@ func TestGetPhotoGroupsExtractsPoolTitles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(groups) != 2 || groups[0] != "Sunsets" || groups[1] != "Nature" {
-		t.Fatalf("got %v", groups)
+	if len(groups) != 2 || groups[0].Title != "Sunsets" || groups[1].Title != "Nature" {
+		t.Fatalf("got %+v", groups)
+	}
+	if groups[0].IconURL != "https://farm6.staticflickr.com/5/buddyicons/111@N01.jpg" {
+		t.Fatalf("unexpected icon URL: %s", groups[0].IconURL)
+	}
+	if groups[1].IconURL != defaultBuddyIconURL {
+		t.Fatalf("expected default icon for group without iconserver, got %s", groups[1].IconURL)
+	}
+	if groups[0].ItemCount != 74045 {
+		t.Fatalf("unexpected item count: %d", groups[0].ItemCount)
+	}
+	if groups[1].ItemCount != 0 {
+		t.Fatalf("expected 0 item count when pool_count absent, got %d", groups[1].ItemCount)
+	}
+	if groups[0].URL != "https://www.flickr.com/groups/sunsetlovers/pool/" {
+		t.Fatalf("expected Flickr's own url field to be used, got %s", groups[0].URL)
+	}
+	if groups[1].URL != "https://www.flickr.com/groups/222@N01/" {
+		t.Fatalf("expected fallback URL built from ID when url field absent, got %s", groups[1].URL)
 	}
 }
 
@@ -505,8 +538,8 @@ func TestGetPhotoPeopleExtractsUsernames(t *testing.T) {
 			"stat": "ok",
 			"people": map[string]interface{}{
 				"person": []interface{}{
-					map[string]interface{}{"username": "alice"},
-					map[string]interface{}{"username": "bob"},
+					map[string]interface{}{"username": "alice", "nsid": "111@N01", "path_alias": "alicealias"},
+					map[string]interface{}{"username": "bob", "nsid": "222@N01"},
 				},
 			},
 		}), nil
@@ -516,8 +549,77 @@ func TestGetPhotoPeopleExtractsUsernames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(people) != 2 || people[0] != "alice" || people[1] != "bob" {
-		t.Fatalf("got %v", people)
+	if len(people) != 2 || people[0].Username != "alice" || people[1].Username != "bob" {
+		t.Fatalf("got %+v", people)
+	}
+	if people[0].ProfileURL != "https://www.flickr.com/photos/alicealias/" {
+		t.Fatalf("expected path_alias in profile URL, got %s", people[0].ProfileURL)
+	}
+	if people[1].ProfileURL != "https://www.flickr.com/photos/222@N01/" {
+		t.Fatalf("expected nsid fallback in profile URL, got %s", people[1].ProfileURL)
+	}
+}
+
+func TestGetPhotoAlbumsExtractsSetsWithCover(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat": "ok",
+			"set": []interface{}{
+				map[string]interface{}{
+					"id": "72177720333153880", "title": "2025-12-27 Nozzano",
+					"primary": "55008303765", "secret": "f1c8c1b5ce", "server": "65535",
+					"count_photo": 45.0, "count_video": 2.0,
+				},
+			},
+		}), nil
+	})
+	client := makeClient()
+	albums, err := client.GetPhotoAlbums("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(albums) != 1 || albums[0].Title != "2025-12-27 Nozzano" {
+		t.Fatalf("got %+v", albums)
+	}
+	if albums[0].ItemCount != 47 {
+		t.Fatalf("expected count_photo+count_video=47, got %d", albums[0].ItemCount)
+	}
+	if albums[0].CoverURL != "https://live.staticflickr.com/65535/55008303765_f1c8c1b5ce_q.jpg" {
+		t.Fatalf("unexpected cover URL: %s", albums[0].CoverURL)
+	}
+	BuildAlbumURL(albums, "lorello")
+	if albums[0].URL != "https://www.flickr.com/photos/lorello/albums/72177720333153880" {
+		t.Fatalf("unexpected album URL: %s", albums[0].URL)
+	}
+}
+
+func TestGetPhotoCommentsExtractsAuthorAndText(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat": "ok",
+			"comments": map[string]interface{}{
+				"comment": []interface{}{
+					map[string]interface{}{
+						"author": "111@N01", "authorname": "Jan", "path_alias": "jan_h",
+						"_content": `Nice <a href="https://example.com">shot</a>!`, "datecreate": "1766845151",
+					},
+				},
+			},
+		}), nil
+	})
+	client := makeClient()
+	comments, err := client.GetPhotoComments("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(comments) != 1 || comments[0].Author != "Jan" {
+		t.Fatalf("got %+v", comments)
+	}
+	if comments[0].Text != "Nice shot!" {
+		t.Fatalf("expected HTML stripped from comment text, got %q", comments[0].Text)
+	}
+	if comments[0].ProfileURL != "https://www.flickr.com/photos/jan_h/" {
+		t.Fatalf("unexpected profile URL: %s", comments[0].ProfileURL)
 	}
 }
 
@@ -629,5 +731,197 @@ func TestRemoveTagCallsRemoveTagWithTagID(t *testing.T) {
 	}
 	if capturedParams["tag_id"] != "111-222" {
 		t.Fatalf("unexpected tag_id: %s", capturedParams["tag_id"])
+	}
+}
+
+func TestIsFullyPrivateTrueWhenNoVisibilityFlagsSet(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat":  "ok",
+			"photo": map[string]interface{}{"visibility": map[string]interface{}{"ispublic": 0, "isfriend": 0, "isfamily": 0}},
+		}), nil
+	})
+	client := makeClient()
+	private, err := client.IsFullyPrivate("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !private {
+		t.Fatal("expected fully private")
+	}
+}
+
+func TestIsFullyPrivateFalseWhenFriendsOrFamily(t *testing.T) {
+	cases := []map[string]interface{}{
+		{"ispublic": 1, "isfriend": 0, "isfamily": 0},
+		{"ispublic": 0, "isfriend": 1, "isfamily": 0},
+		{"ispublic": 0, "isfriend": 0, "isfamily": 1},
+	}
+	for _, visibility := range cases {
+		withUnsignedGet(t, func(string, map[string]string) (string, error) {
+			return jsonBody(map[string]interface{}{
+				"stat":  "ok",
+				"photo": map[string]interface{}{"visibility": visibility},
+			}), nil
+		})
+		client := makeClient()
+		private, err := client.IsFullyPrivate("999")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if private {
+			t.Fatalf("expected NOT fully private for visibility %+v", visibility)
+		}
+	}
+}
+
+func TestGetPhotoInfoCachesRepeatedCallsForSamePhoto(t *testing.T) {
+	calls := 0
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		calls++
+		return jsonBody(map[string]interface{}{
+			"stat":  "ok",
+			"photo": map[string]interface{}{"server": "65535", "id": "999", "secret": "abc"},
+		}), nil
+	})
+	client := makeClient()
+	if _, err := client.GetPhotoDisplayURL("999"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := client.IsFullyPrivate("999"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := client.GetPhotoDescription("999"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected 1 real getInfo call for 3 reads of the same photo, got %d", calls)
+	}
+}
+
+func TestGetPhotoInfoDoesNotCacheAcrossDifferentPhotos(t *testing.T) {
+	calls := 0
+	withUnsignedGet(t, func(_ string, params map[string]string) (string, error) {
+		calls++
+		return jsonBody(map[string]interface{}{
+			"stat":  "ok",
+			"photo": map[string]interface{}{"server": "65535", "id": params["photo_id"], "secret": "abc"},
+		}), nil
+	})
+	client := makeClient()
+	if _, err := client.GetPhotoDisplayURL("111"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := client.GetPhotoDisplayURL("222"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected 2 real getInfo calls for 2 different photos, got %d", calls)
+	}
+}
+
+func TestAddTagInvalidatesPhotoInfoCache(t *testing.T) {
+	calls := 0
+	withUnsignedGet(t, func(_ string, params map[string]string) (string, error) {
+		if params["method"] == "flickr.photos.addTags" {
+			return jsonBody(map[string]interface{}{"stat": "ok"}), nil
+		}
+		calls++
+		return jsonBody(map[string]interface{}{
+			"stat":  "ok",
+			"photo": map[string]interface{}{"server": "65535", "id": "999", "secret": "abc"},
+		}), nil
+	})
+	client := makeClient()
+	if _, err := client.GetPhotoDisplayURL("999"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := client.AddTag("999", "flickrmp:status=published"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := client.GetPhotoDisplayURL("999"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected getInfo to be re-fetched after AddTag, got %d real calls", calls)
+	}
+}
+
+func TestCallPacesConsecutiveCallsToApiCallMinInterval(t *testing.T) {
+	origLastCall := restCallPacer.lastCall
+	restCallPacer.lastCall = time.Time{}
+	t.Cleanup(func() { restCallPacer.lastCall = origLastCall })
+
+	var slept time.Duration
+	origSleep := sleepFunc
+	sleepFunc = func(d time.Duration) { slept += d }
+	t.Cleanup(func() { sleepFunc = origSleep })
+
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{"stat": "ok"}), nil
+	})
+	client := makeClient()
+
+	if _, err := client.Call("flickr.test.echo", nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if slept != 0 {
+		t.Fatalf("expected no wait on the first call, got %v", slept)
+	}
+
+	if _, err := client.Call("flickr.test.echo", nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if slept < apiCallMinInterval-10*time.Millisecond {
+		t.Fatalf("expected the second call back-to-back to wait ~%v, got %v", apiCallMinInterval, slept)
+	}
+}
+
+func TestGetPhotoExtractsTitleAndRawTags(t *testing.T) {
+	withUnsignedGet(t, func(string, map[string]string) (string, error) {
+		return jsonBody(map[string]interface{}{
+			"stat": "ok",
+			"photo": map[string]interface{}{
+				"title": map[string]interface{}{"_content": "PXL_1.MP"},
+				"media": "photo",
+				"tags": map[string]interface{}{
+					"tag": []interface{}{
+						map[string]interface{}{"raw": "flickrmp:status=published", "_content": "flickrmpstatuspublished"},
+						map[string]interface{}{"raw": "vacation", "_content": "vacation"},
+					},
+				},
+			},
+		}), nil
+	})
+	client := makeClient()
+	photo, err := client.GetPhoto("999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := Photo{ID: "999", Title: "PXL_1.MP", Tags: []string{"flickrmp:status=published", "vacation"}, Media: "photo"}
+	if !reflect.DeepEqual(photo, want) {
+		t.Fatalf("got %+v, want %+v", photo, want)
+	}
+}
+
+func TestGetPhotosPageSendsMinUploadDateWhenSet(t *testing.T) {
+	var got map[string]string
+	withUnsignedGet(t, func(_ string, params map[string]string) (string, error) {
+		got = params
+		return `{"stat":"ok","photos":{"photo":[]}}`, nil
+	})
+	client := makeClient()
+	if _, err := client.GetPhotosPage("u", 1, 100); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["min_upload_date"]; ok {
+		t.Fatal("min_upload_date must be absent when MinUploadDate is zero")
+	}
+	client.MinUploadDate = time.Unix(1600000000, 0)
+	if _, err := client.GetPhotosPage("u", 1, 100); err != nil {
+		t.Fatal(err)
+	}
+	if got["min_upload_date"] != "1600000000" {
+		t.Fatalf("min_upload_date = %q, want 1600000000", got["min_upload_date"])
 	}
 }

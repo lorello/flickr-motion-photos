@@ -12,7 +12,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"motionphotos/internal/dotenv"
 	"motionphotos/internal/flickrclient"
+	"motionphotos/internal/plausible"
 	"motionphotos/internal/r2upload"
 	"motionphotos/internal/scanner"
 	"motionphotos/internal/sitegen"
@@ -24,6 +26,8 @@ func main() {
 	cacheDir := flag.String("cache-dir", os.TempDir(), "Local state cache directory")
 	repoRoot := flag.String("repo-root", ".", "Repository root containing site/template.html")
 	flag.Parse()
+
+	dotenv.Load(filepath.Join(*repoRoot, ".env"))
 
 	apiKey := os.Getenv("FLICKRGO_API_KEY")
 	apiSecret := os.Getenv("FLICKRGO_API_SECRET")
@@ -56,7 +60,14 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error creating R2 client:", err)
 		os.Exit(1)
 	}
-	publisher := r2upload.PageUploader{Client: r2Client, Bucket: r2Bucket, PublicBaseURL: r2PublicBaseURL}
+	publisher := r2upload.PageUploader{Client: r2Client, Bucket: r2Bucket, PublicBaseURL: r2PublicBaseURL, Username: *username}
+
+	if err := r2upload.UploadStaticAssets(context.Background(), r2Client, r2Bucket, r2PublicBaseURL, *repoRoot); err != nil {
+		fmt.Fprintln(os.Stderr, "error uploading static assets (style.css/script.js):", err)
+		os.Exit(1)
+	}
+
+	plausibleKey, plausibleSite := os.Getenv("PLAUSIBLE_API_KEY"), os.Getenv("PLAUSIBLE_SITE_ID")
 
 	templateBytes, err := os.ReadFile(filepath.Join(*repoRoot, "site", "template.html"))
 	if err != nil {
@@ -79,10 +90,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	photoIDs := store.PhotoIDsByStatus("published")
-	fmt.Fprintf(os.Stderr, "[INFO] republishing %d photo(s)\n", len(photoIDs))
+	records := store.RecordsByStatus("published")
+	fmt.Fprintf(os.Stderr, "[INFO] republishing %d photo(s)\n", len(records))
 
-	for _, photoID := range photoIDs {
+	for photoID, rec := range records {
+		// key is the public R2 key (a random token for photos processed
+		// after the token feature landed; falls back to the plain photo
+		// ID for older cache entries that predate it, so their already-
+		// shared link keeps working).
+		key := rec.Token
+		if key == "" {
+			key = photoID
+		}
+
 		result, err := client.Call("flickr.photos.getInfo", map[string]string{"photo_id": photoID})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "FAIL getInfo", photoID, err)
@@ -105,19 +125,48 @@ func main() {
 		// Supplementary: each degrades gracefully on its own if it fails.
 		exif, _ := client.GetPhotoExif(photoID)
 		favorites, _ := client.GetPhotoFavoritesCount(photoID)
-		groups, _ := client.GetPhotoGroups(photoID)
-		people, _ := client.GetPhotoPeople(photoID)
+		rawGroups, _ := client.GetPhotoGroups(photoID)
+		rawAlbums, _ := client.GetPhotoAlbums(photoID)
+		flickrclient.BuildAlbumURL(rawAlbums, *username)
+		rawPeople, _ := client.GetPhotoPeople(photoID)
+		rawComments, _ := client.GetPhotoComments(photoID)
+
+		groups := make([]sitegen.GroupInfo, 0, len(rawGroups))
+		for _, g := range rawGroups {
+			groups = append(groups, sitegen.GroupInfo{Title: g.Title, IconURL: g.IconURL, URL: g.URL, ItemCount: g.ItemCount})
+		}
+		albums := make([]sitegen.AlbumInfo, 0, len(rawAlbums))
+		for _, a := range rawAlbums {
+			albums = append(albums, sitegen.AlbumInfo{Title: a.Title, CoverURL: a.CoverURL, URL: a.URL, ItemCount: a.ItemCount})
+		}
+		people := make([]sitegen.PersonInfo, 0, len(rawPeople))
+		for _, p := range rawPeople {
+			people = append(people, sitegen.PersonInfo{Username: p.Username, IconURL: p.IconURL, ProfileURL: p.ProfileURL})
+		}
+		commentList := make([]sitegen.CommentInfo, 0, len(rawComments))
+		for _, c := range rawComments {
+			commentList = append(commentList, sitegen.CommentInfo{Author: c.Author, IconURL: c.IconURL, ProfileURL: c.ProfileURL, Text: c.Text, Date: c.Date})
+		}
 		var mapEmbedURL string
 		if lat, lon, hasGeo, geoErr := client.GetPhotoGeo(photoID); geoErr == nil && hasGeo {
 			mapEmbedURL, _ = scanner.BuildMapEmbedURL(lat, lon)
+			fmt.Printf("geo photo=%s lat=%s lon=%s map=%s\n", photoID, lat, lon, scanner.DescribeGeoPrivacy(lat, lon))
 		}
 
-		videoURL := r2PublicBaseURL + "/" + photoID + ".mp4"
+		videoURL := r2PublicBaseURL + "/" + key + ".mp4"
 
 		currentDescription, err := client.GetPhotoDescription(photoID)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "FAIL description", photoID, err)
 			continue
+		}
+
+		var pageViews string
+		if plausibleKey != "" && plausibleSite != "" {
+			path := fmt.Sprintf("/photos/%s/%s.html", *username, key)
+			if _, views, pvErr := plausible.GetPageViews(plausibleKey, plausibleSite, path); pvErr == nil {
+				pageViews = fmt.Sprintf("%d", views)
+			}
 		}
 
 		html, err := sitegen.RenderPhotoPage(string(templateBytes), sitegen.PageData{
@@ -133,24 +182,31 @@ func main() {
 			DateUploaded:     details.DateUploaded,
 			Tags:             details.Tags,
 			Views:            details.Views,
+			PageViews:        pageViews,
 			Comments:         details.Comments,
 			Favorites:        favorites,
 			LicenseName:      details.LicenseName,
 			LicenseURL:       details.LicenseURL,
 			MapEmbedURL:      mapEmbedURL,
 			Groups:           groups,
+			Albums:           albums,
 			People:           people,
+			CommentList:      commentList,
 			Camera:           exif.Camera,
 			ExposureTime:     exif.ExposureTime,
 			FNumber:          exif.FNumber,
 			ISO:              exif.ISO,
 			FocalLength:      exif.FocalLength,
+			SafetyLevel:      details.SafetyLevel,
+			ViewPrivacy:      details.ViewPrivacy,
+			CommentPerm:      details.CommentPerm,
+			AddMetaPerm:      details.AddMetaPerm,
 		})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "FAIL render", photoID, err)
 			continue
 		}
-		url, err := publisher.PublishPage(photoID, html)
+		url, err := publisher.PublishPage(key, html)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "FAIL publish", photoID, err)
 			continue

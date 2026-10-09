@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -52,6 +54,10 @@ var licenseURLs = map[string]string{
 
 const apiURL = "https://api.flickr.com/services/rest"
 
+// flickroauthHTTPClient ha un timeout esplicito: http.Get (DefaultClient)
+// non ne ha, e una connessione appesa ha bloccato lo scan per ~7.5h.
+var flickroauthHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 // ErrOriginalNotAvailable segnala che Flickr non espone originalsecret/
 // originalformat per questa foto — richiede un client autenticato come
 // owner (OAuth), a prescindere dal fatto che la foto sia pubblica.
@@ -60,7 +66,7 @@ var ErrOriginalNotAvailable = errors.New("original not available: owner-authenti
 // signedGetFunc, unsignedGetFunc e httpGetFunc permettono ai test di
 // sostituire il livello HTTP.
 var signedGetFunc = flickroauth.SignedGet
-var httpGetFunc = http.Get
+var httpGetFunc = flickroauthHTTPClient.Get
 
 // downloadOriginalFunc scarica i byte dell'originale da live.staticflickr.com.
 // Implementazione di default: shell out a curl invece del client HTTP nativo
@@ -106,14 +112,18 @@ func (c *cdnCooldown) waitIfBlocked() {
 	until := c.blockedUntil
 	c.mu.Unlock()
 	if wait := time.Until(until); wait > 0 {
+		fmt.Fprintf(os.Stderr, "[%s] [COOLDOWN] rate-limited, sleeping %s until %s\n",
+			time.Now().Format("15:04:05"), wait.Round(time.Second), until.Format("15:04:05"))
 		sleepFunc(wait)
+		fmt.Fprintf(os.Stderr, "[%s] [COOLDOWN] resuming\n", time.Now().Format("15:04:05"))
 	}
 }
 
-func (c *cdnCooldown) recordRateLimited() {
+func (c *cdnCooldown) recordRateLimited(url string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.blockedUntil = time.Now().Add(c.nextBackoff)
+	fmt.Fprintf(os.Stderr, "[%s] [COOLDOWN] 429 on %s, next wait %s\n", time.Now().Format("15:04:05"), url, c.nextBackoff)
 	if c.nextBackoff < 30*time.Minute {
 		c.nextBackoff *= 2
 	}
@@ -125,13 +135,41 @@ func (c *cdnCooldown) recordSuccess() {
 	c.nextBackoff = time.Minute
 }
 
+// apiCallMinInterval paces REST calls to api.flickr.com at ~3000/hour —
+// under Flickr's documented 3600/hour per-key ceiling, leaving headroom
+// for calls made outside this process (cmd/authorize, manual curl,
+// cmd/republish running at the same time). Self-imposed rather than
+// reactive like cdnCooldown: Flickr's docs say an abusive key gets
+// disabled, not warned first with a visible 429 — waiting to see one
+// before slowing down would already be too late.
+const apiCallMinInterval = time.Hour / 3000
+
+// apiCallPacer enforces apiCallMinInterval between REST calls, process-wide
+// (not per Client instance) — the 3600/hour ceiling is per API key, and
+// the key is shared across however many Client values exist.
+type apiCallPacer struct {
+	mu       sync.Mutex
+	lastCall time.Time
+}
+
+func (p *apiCallPacer) wait() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if wait := apiCallMinInterval - time.Since(p.lastCall); wait > 0 {
+		sleepFunc(wait)
+	}
+	p.lastCall = time.Now()
+}
+
+var restCallPacer = &apiCallPacer{}
+
 func curlDownload(rawURL string) (body []byte, statusCode int, err error) {
 	downloadCooldown.waitIfBlocked()
 	sleepFunc(downloadThrottle)
 	body, statusCode, err = curlDownloadOnce(rawURL)
 	if err == nil {
 		if statusCode == http.StatusTooManyRequests {
-			downloadCooldown.recordRateLimited()
+			downloadCooldown.recordRateLimited(rawURL)
 		} else {
 			downloadCooldown.recordSuccess()
 		}
@@ -184,6 +222,8 @@ var unsignedGetFunc = func(rawURL string, params map[string]string) (string, err
 
 type APIError struct {
 	Message string
+	// Code is Flickr's numeric error code (0 if absent).
+	Code int
 }
 
 func (e *APIError) Error() string { return e.Message }
@@ -192,6 +232,17 @@ type Photo struct {
 	ID    string
 	Title string
 	Tags  []string
+	// Media is "photo" or "video" (Flickr's own extras=media field). A
+	// genuine Flickr video upload can never be a Pixel Motion Photo (which
+	// is a JPEG with an embedded clip, media=="photo") — filtering these
+	// out before attempting a download avoids a guaranteed-to-fail
+	// original-file request (confirmed live: Flickr's CDN 500s on it).
+	Media string
+	// ContentType is "Photo", "Screenshot" or "Other" — Flickr's own
+	// extras=content_type field (0/1/2), only available from a listing
+	// call (not from getInfo), so it's empty when a Photo comes from
+	// GetPhoto (single-ID fetch) instead of GetPhotosPage/GetPhotosetPhotos.
+	ContentType string
 }
 
 // Client parla con l'API REST di Flickr. Se AccessToken/AccessTokenSecret
@@ -204,10 +255,36 @@ type Client struct {
 	ConsumerSecret    string
 	AccessToken       string
 	AccessTokenSecret string
+
+	// MinUploadDate, se non zero, limita GetPhotosPage alle foto caricate
+	// da quella data in poi (min_upload_date di flickr.people.getPhotos).
+	MinUploadDate time.Time
+
+	photoInfoMu    sync.Mutex
+	photoInfoCache map[string]photoInfoCacheEntry
+}
+
+// photoInfoCacheTTL bounds how long a cached getInfo response is reused.
+// Short on purpose: it only needs to collapse the handful of getPhotoInfo
+// calls ProcessPhoto/finishPublish make seconds apart for the SAME photo
+// (originalURL, IsFullyPrivate, displayURL, details, description, the
+// title-preserving read inside SetDescription) into one real API call —
+// it's not meant to serve stale data across a later, separate run.
+const photoInfoCacheTTL = 5 * time.Minute
+
+type photoInfoCacheEntry struct {
+	info      map[string]interface{}
+	fetchedAt time.Time
 }
 
 func NewClient(consumerKey, consumerSecret, accessToken, accessTokenSecret string) *Client {
-	return &Client{consumerKey, consumerSecret, accessToken, accessTokenSecret}
+	return &Client{
+		ConsumerKey:       consumerKey,
+		ConsumerSecret:    consumerSecret,
+		AccessToken:       accessToken,
+		AccessTokenSecret: accessTokenSecret,
+		photoInfoCache:    make(map[string]photoInfoCacheEntry),
+	}
 }
 
 // Authenticated indica se il client ha un access token OAuth (quindi puo'
@@ -216,7 +293,38 @@ func (c *Client) Authenticated() bool {
 	return c.AccessToken != "" && c.AccessTokenSecret != ""
 }
 
+// Call esegue una chiamata REST con retry sugli errori transitori
+// (rete, risposta non-JSON, Flickr 105 "service unavailable") e circuit
+// breaker process-wide: vedi resilience.go. Gli errori applicativi di
+// Flickr (foto non trovata, permessi, ...) non vengono ritentati.
 func (c *Client) Call(method string, params map[string]string) (map[string]interface{}, error) {
+	if err := apiBreaker.allow(); err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	var err error
+	for attempt := 1; attempt <= maxCallAttempts; attempt++ {
+		result, err = c.callOnce(method, params)
+		if err == nil || !isTransient(err) {
+			// Un APIError "normale" significa che Flickr risponde: non
+			// conta come fallimento per il breaker.
+			apiBreaker.record(true)
+			return result, err
+		}
+		if attempt < maxCallAttempts {
+			delay := retryBaseDelay << (attempt - 1)
+			fmt.Fprintf(os.Stderr, "[%s] [RETRY] %s attempt %d/%d failed: %v (retry in %s)\n",
+				time.Now().Format("15:04:05"), method, attempt, maxCallAttempts, err, delay)
+			sleepFunc(delay)
+		}
+	}
+	apiBreaker.record(false)
+	return nil, err
+}
+
+func (c *Client) callOnce(method string, params map[string]string) (map[string]interface{}, error) {
+	restCallPacer.wait()
+
 	var body string
 	var err error
 
@@ -242,34 +350,78 @@ func (c *Client) Call(method string, params map[string]string) (map[string]inter
 		body, err = unsignedGetFunc(apiURL, full)
 	}
 	if err != nil {
-		return nil, err
+		return nil, &transientError{err: err}
 	}
 
 	var result map[string]interface{}
 	if err := json.Unmarshal([]byte(body), &result); err != nil {
-		return nil, err
+		return nil, &transientError{err: fmt.Errorf("invalid JSON from Flickr: %w", err)}
 	}
 	if stat, _ := result["stat"].(string); stat != "ok" {
 		msg, _ := result["message"].(string)
 		if msg == "" {
 			msg = "unknown Flickr API error"
 		}
-		return nil, &APIError{Message: msg}
+		code, _ := result["code"].(float64)
+		return nil, &APIError{Message: msg, Code: int(code)}
 	}
 	return result, nil
 }
 
 func (c *Client) getPhotoInfo(photoID string) (map[string]interface{}, error) {
+	c.photoInfoMu.Lock()
+	if entry, ok := c.photoInfoCache[photoID]; ok && time.Since(entry.fetchedAt) < photoInfoCacheTTL {
+		c.photoInfoMu.Unlock()
+		return entry.info, nil
+	}
+	c.photoInfoMu.Unlock()
+
 	result, err := c.Call("flickr.photos.getInfo", map[string]string{"photo_id": photoID})
 	if err != nil {
 		return nil, err
 	}
 	photo, _ := result["photo"].(map[string]interface{})
+
+	c.photoInfoMu.Lock()
+	c.photoInfoCache[photoID] = photoInfoCacheEntry{info: photo, fetchedAt: time.Now()}
+	c.photoInfoMu.Unlock()
+
 	return photo, nil
 }
 
+// invalidatePhotoInfo drops the cached getInfo response for photoID —
+// called after a write (SetDescription, AddTag) so a later read within the
+// same run can't return pre-write data instead of a fresh one.
+func (c *Client) invalidatePhotoInfo(photoID string) {
+	c.photoInfoMu.Lock()
+	delete(c.photoInfoCache, photoID)
+	c.photoInfoMu.Unlock()
+}
+
+// IsFullyPrivate reports whether photoID is visible to no one but the
+// owner (public=0, friend=0, family=0). Used to defer publishing a viewer
+// page/description link — the page/video sit on a public R2 bucket with
+// no auth of their own, so a fully-private photo must stay unpublished.
+// A friends/family-only photo IS published (under an unguessable token
+// URL, not the Flickr photo ID): whoever can already see the photo's
+// description on Flickr has the link, same trust boundary Flickr itself
+// already drew for that photo.
+func (c *Client) IsFullyPrivate(photoID string) (bool, error) {
+	info, err := c.getPhotoInfo(photoID)
+	if err != nil {
+		return false, err
+	}
+	visibility, _ := info["visibility"].(map[string]interface{})
+	isPublic, _ := visibility["ispublic"].(float64)
+	isFriend, _ := visibility["isfriend"].(float64)
+	isFamily, _ := visibility["isfamily"].(float64)
+	return isPublic == 0 && isFriend == 0 && isFamily == 0, nil
+}
+
 // PhotoDetails carries the extra display metadata the viewer page uses,
-// all sourced from a single getInfo call (no extra API cost per photo).
+// all sourced from a single getInfo call (no extra API cost per photo),
+// plus one flickr.photos.getPerms call for the comment/add-metadata
+// permission levels (not part of getInfo).
 type PhotoDetails struct {
 	OwnerName      string
 	OwnerAvatarURL string
@@ -280,10 +432,38 @@ type PhotoDetails struct {
 	Comments       string
 	LicenseName    string
 	LicenseURL     string
+	SafetyLevel    string // "Safe" | "Moderate" | "Restricted"
+	ViewPrivacy    string // "Public" | "Friends" | "Family" | "Friends & Family" | "Only you"
+	CommentPerm    string // who can comment: "Everyone" | "People you follow" | "Friends and family" | "Only you"
+	AddMetaPerm    string // who can add tags/notes/people: same scale as CommentPerm
 }
 
-// GetPhotoDetails returns owner/avatar/date/tags for the viewer page.
-// Internal status tags (flickrmp:*) are filtered out — they're not
+var safetyLevelNames = map[string]string{"0": "Safe", "1": "Moderate", "2": "Restricted"}
+
+// permLevelNames maps flickr.photos.getPerms' permcomment/permaddmeta
+// values to the exact wording Flickr's own privacy UI uses.
+var permLevelNames = map[string]string{"0": "Only you", "1": "Friends and family", "2": "People you follow", "3": "Everyone"}
+
+func viewPrivacyName(visibility map[string]interface{}) string {
+	isPublic, _ := visibility["ispublic"].(float64)
+	isFriend, _ := visibility["isfriend"].(float64)
+	isFamily, _ := visibility["isfamily"].(float64)
+	switch {
+	case isPublic == 1:
+		return "Public"
+	case isFriend == 1 && isFamily == 1:
+		return "Friends & Family"
+	case isFriend == 1:
+		return "Friends"
+	case isFamily == 1:
+		return "Family"
+	default:
+		return "Only you"
+	}
+}
+
+// GetPhotoDetails returns owner/avatar/date/tags/privacy for the viewer
+// page. Internal status tags (flickrmp:*) are filtered out — they're not
 // meant for display.
 func (c *Client) GetPhotoDetails(photoID string) (PhotoDetails, error) {
 	info, err := c.getPhotoInfo(photoID)
@@ -294,13 +474,9 @@ func (c *Client) GetPhotoDetails(photoID string) (PhotoDetails, error) {
 	owner, _ := info["owner"].(map[string]interface{})
 	username, _ := owner["username"].(string)
 	nsid, _ := owner["nsid"].(string)
-	iconServer, _ := owner["iconserver"].(string)
-	iconFarm, _ := owner["iconfarm"].(float64)
-
-	avatarURL := "https://www.flickr.com/images/buddyicon.gif"
-	if iconServer != "" && iconServer != "0" {
-		avatarURL = fmt.Sprintf("https://farm%d.staticflickr.com/%s/buddyicons/%s.jpg", int(iconFarm), iconServer, nsid)
-	}
+	ownerIconServer, _ := owner["iconserver"].(string)
+	ownerIconFarm, _ := owner["iconfarm"].(float64)
+	avatarURL := buddyIconURL(ownerIconServer, ownerIconFarm, nsid)
 
 	dates, _ := info["dates"].(map[string]interface{})
 	dateTaken, _ := dates["taken"].(string)
@@ -314,7 +490,7 @@ func (c *Client) GetPhotoDetails(photoID string) (PhotoDetails, error) {
 		if content == "" || strings.HasPrefix(content, "flickrmp:") {
 			continue // internal bookkeeping namespace, not for display
 		}
-		tags = append(tags, content)
+		tags = append(tags, html.UnescapeString(content))
 	}
 
 	views, _ := info["views"].(string)
@@ -330,12 +506,27 @@ func (c *Client) GetPhotoDetails(photoID string) (PhotoDetails, error) {
 	}
 
 	licenseID, _ := info["license"].(string)
+	safetyLevel, _ := info["safety_level"].(string)
+	visibility, _ := info["visibility"].(map[string]interface{})
+
+	var commentPerm, addMetaPerm string
+	if permsResult, permsErr := c.Call("flickr.photos.getPerms", map[string]string{"photo_id": photoID}); permsErr == nil {
+		perms, _ := permsResult["perms"].(map[string]interface{})
+		if v, ok := perms["permcomment"].(float64); ok {
+			commentPerm = permLevelNames[strconv.Itoa(int(v))]
+		}
+		if v, ok := perms["permaddmeta"].(float64); ok {
+			addMetaPerm = permLevelNames[strconv.Itoa(int(v))]
+		}
+	}
 
 	return PhotoDetails{
 		OwnerName: username, OwnerAvatarURL: avatarURL,
 		DateTaken: dateTaken, DateUploaded: dateUploaded,
 		Tags: tags, Views: views, Comments: comments,
 		LicenseName: licenseNames[licenseID], LicenseURL: licenseURLs[licenseID],
+		SafetyLevel: safetyLevelNames[safetyLevel], ViewPrivacy: viewPrivacyName(visibility),
+		CommentPerm: commentPerm, AddMetaPerm: addMetaPerm,
 	}, nil
 }
 
@@ -396,43 +587,228 @@ func (c *Client) GetPhotoGeo(photoID string) (lat, lon string, hasGeo bool, err 
 	return lat, lon, true, nil
 }
 
-// GetPhotoGroups returns the names of the groups (pools) this photo has
-// been added to, if any.
-func (c *Client) GetPhotoGroups(photoID string) ([]string, error) {
+// Group is a Flickr group pool this photo has been added to.
+type Group struct {
+	ID        string
+	Title     string
+	IconURL   string
+	URL       string
+	ItemCount int
+}
+
+// Person is someone tagged in this photo.
+type Person struct {
+	Username   string
+	IconURL    string
+	ProfileURL string
+}
+
+// Album is a Flickr photoset (album) containing this photo. URL is left
+// for the caller to fill in (needs the owner's username, which this
+// package doesn't otherwise track) via BuildAlbumURL.
+type Album struct {
+	ID        string
+	Title     string
+	CoverURL  string
+	ItemCount int
+	URL       string
+}
+
+// BuildAlbumURL fills in Album.URL for every album in the slice, given the
+// owner's Flickr username (the URL path segment, not the display name).
+func BuildAlbumURL(albums []Album, username string) {
+	for i := range albums {
+		albums[i].URL = fmt.Sprintf("https://www.flickr.com/photos/%s/albums/%s", username, albums[i].ID)
+	}
+}
+
+const defaultBuddyIconURL = "https://www.flickr.com/images/buddyicon.gif"
+
+func buddyIconURL(iconServer string, iconFarm float64, nsid string) string {
+	if iconServer == "" || iconServer == "0" {
+		return defaultBuddyIconURL
+	}
+	return fmt.Sprintf("https://farm%d.staticflickr.com/%s/buddyicons/%s.jpg", int(iconFarm), iconServer, nsid)
+}
+
+// GetPhotoGroups returns the groups (pools) this photo has been added to,
+// if any.
+func (c *Client) GetPhotoGroups(photoID string) ([]Group, error) {
 	result, err := c.Call("flickr.photos.getAllContexts", map[string]string{"photo_id": photoID})
 	if err != nil {
 		return nil, err
 	}
 	rawPools, _ := result["pool"].([]interface{})
-	groups := make([]string, 0, len(rawPools))
+	groups := make([]Group, 0, len(rawPools))
 	for _, item := range rawPools {
 		p, _ := item.(map[string]interface{})
+		id, _ := p["id"].(string)
 		title, _ := p["title"].(string)
-		if title != "" {
-			groups = append(groups, title)
+		if title == "" {
+			continue
 		}
+		title = html.UnescapeString(title)
+		iconServer, _ := p["iconserver"].(string)
+		iconFarm, _ := p["iconfarm"].(float64)
+		// "url" is Flickr's own relative path (e.g. "/groups/womanportrait/pool/",
+		// a nicer slug when the group has one, not just the raw NSID) —
+		// preferred over building one from the ID ourselves.
+		groupURL := fmt.Sprintf("https://www.flickr.com/groups/%s/", id)
+		if relURL, _ := p["url"].(string); relURL != "" {
+			groupURL = "https://www.flickr.com" + relURL
+		}
+		itemCount := 0
+		if poolCount, _ := p["pool_count"].(string); poolCount != "" {
+			itemCount, _ = strconv.Atoi(poolCount)
+		}
+		groups = append(groups, Group{
+			ID:        id,
+			Title:     title,
+			IconURL:   buddyIconURL(iconServer, iconFarm, id),
+			URL:       groupURL,
+			ItemCount: itemCount,
+		})
 	}
 	return groups, nil
 }
 
-// GetPhotoPeople returns the usernames of people tagged in this photo, if
-// any.
-func (c *Client) GetPhotoPeople(photoID string) ([]string, error) {
+// GetPhotoAlbums returns the albums (photosets) this photo belongs to, if
+// any. Album.URL is empty until BuildAlbumURL fills it in.
+func (c *Client) GetPhotoAlbums(photoID string) ([]Album, error) {
+	result, err := c.Call("flickr.photos.getAllContexts", map[string]string{"photo_id": photoID})
+	if err != nil {
+		return nil, err
+	}
+	rawSets, _ := result["set"].([]interface{})
+	albums := make([]Album, 0, len(rawSets))
+	for _, item := range rawSets {
+		s, _ := item.(map[string]interface{})
+		id, _ := s["id"].(string)
+		title, _ := s["title"].(string)
+		if title == "" {
+			continue
+		}
+		title = html.UnescapeString(title)
+		primary, _ := s["primary"].(string)
+		secret, _ := s["secret"].(string)
+		server, _ := s["server"].(string)
+		countPhoto, _ := s["count_photo"].(float64)
+		countVideo, _ := s["count_video"].(float64)
+		coverURL := ""
+		if primary != "" && secret != "" && server != "" {
+			coverURL = fmt.Sprintf("https://live.staticflickr.com/%s/%s_%s_q.jpg", server, primary, secret)
+		}
+		albums = append(albums, Album{
+			ID:        id,
+			Title:     title,
+			CoverURL:  coverURL,
+			ItemCount: int(countPhoto) + int(countVideo),
+		})
+	}
+	return albums, nil
+}
+
+// GetPhotoPeople returns the people tagged in this photo, if any.
+func (c *Client) GetPhotoPeople(photoID string) ([]Person, error) {
 	result, err := c.Call("flickr.photos.people.getList", map[string]string{"photo_id": photoID})
 	if err != nil {
 		return nil, err
 	}
 	peopleObj, _ := result["people"].(map[string]interface{})
 	rawPeople, _ := peopleObj["person"].([]interface{})
-	people := make([]string, 0, len(rawPeople))
+	people := make([]Person, 0, len(rawPeople))
 	for _, item := range rawPeople {
 		p, _ := item.(map[string]interface{})
 		username, _ := p["username"].(string)
-		if username != "" {
-			people = append(people, username)
+		if username == "" {
+			continue
 		}
+		nsid, _ := p["nsid"].(string)
+		iconServer, _ := p["iconserver"].(string)
+		iconFarm, _ := p["iconfarm"].(float64)
+		profileSlug := nsid
+		if pathAlias, _ := p["path_alias"].(string); pathAlias != "" {
+			profileSlug = pathAlias
+		}
+		people = append(people, Person{
+			Username:   username,
+			IconURL:    buddyIconURL(iconServer, iconFarm, nsid),
+			ProfileURL: fmt.Sprintf("https://www.flickr.com/photos/%s/", profileSlug),
+		})
 	}
 	return people, nil
+}
+
+// Comment is one comment on this photo. Text is plain text (HTML stripped
+// by the caller/template) — comment bodies come from arbitrary Flickr
+// users and are never trusted as safe markup, unlike our own generated
+// content elsewhere on the page.
+type Comment struct {
+	Author     string
+	IconURL    string
+	ProfileURL string
+	Text       string
+	Date       string
+}
+
+// GetPhotoComments returns this photo's comments, oldest first (Flickr's
+// own listing order).
+func (c *Client) GetPhotoComments(photoID string) ([]Comment, error) {
+	result, err := c.Call("flickr.photos.comments.getList", map[string]string{"photo_id": photoID})
+	if err != nil {
+		return nil, err
+	}
+	commentsObj, _ := result["comments"].(map[string]interface{})
+	rawComments, _ := commentsObj["comment"].([]interface{})
+	comments := make([]Comment, 0, len(rawComments))
+	for _, item := range rawComments {
+		c, _ := item.(map[string]interface{})
+		authorName, _ := c["authorname"].(string)
+		content, _ := c["_content"].(string)
+		if authorName == "" {
+			continue
+		}
+		author, _ := c["author"].(string)
+		iconServer, _ := c["iconserver"].(string)
+		iconFarm, _ := c["iconfarm"].(float64)
+		profileSlug := author
+		if pathAlias, _ := c["path_alias"].(string); pathAlias != "" {
+			profileSlug = pathAlias
+		}
+		var date string
+		if rawDate, _ := c["datecreate"].(string); rawDate != "" {
+			if secs, err := strconv.ParseInt(rawDate, 10, 64); err == nil {
+				date = time.Unix(secs, 0).UTC().Format("2006-01-02")
+			}
+		}
+		comments = append(comments, Comment{
+			Author:     html.UnescapeString(authorName),
+			IconURL:    buddyIconURL(iconServer, iconFarm, author),
+			ProfileURL: fmt.Sprintf("https://www.flickr.com/photos/%s/", profileSlug),
+			Text:       html.UnescapeString(stripHTMLTags(content)),
+			Date:       date,
+		})
+	}
+	return comments, nil
+}
+
+// stripHTMLTags removes HTML tags from Flickr's comment _content, which
+// may contain basic markup (e.g. auto-linkified URLs) — treated as plain
+// text since comment bodies come from arbitrary Flickr users.
+func stripHTMLTags(s string) string {
+	var b strings.Builder
+	inTag := false
+	for _, r := range s {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // PhotoExif carries camera/exposure info for the viewer page's "additional
@@ -495,18 +871,20 @@ func (c *Client) FindUserIDByUsername(username string) (string, error) {
 	return nsid, nil
 }
 
-// GetPhotosPage restituisce le foto pubbliche dell'utente. privacy_filter=1
-// e' rilevante solo quando autenticati come owner (altrimenti una chiamata
-// anonima vede gia' solo le foto pubbliche per definizione).
+// GetPhotosPage restituisce le foto dell'utente. Quando autenticati come
+// owner questo include anche le private (una chiamata anonima vede solo le
+// pubbliche per definizione) — lo scanner le rileva ed estrae comunque il
+// video, ma rimanda la pubblicazione della pagina finché non sono almeno
+// friends/family (vedi ProcessPhoto/IsFullyPrivate).
 func (c *Client) GetPhotosPage(userID string, page, perPage int) ([]Photo, error) {
 	params := map[string]string{
 		"user_id":  userID,
-		"extras":   "tags",
+		"extras":   "tags,media,content_type",
 		"page":     strconv.Itoa(page),
 		"per_page": strconv.Itoa(perPage),
 	}
-	if c.Authenticated() {
-		params["privacy_filter"] = "1"
+	if !c.MinUploadDate.IsZero() {
+		params["min_upload_date"] = strconv.FormatInt(c.MinUploadDate.Unix(), 10)
 	}
 	result, err := c.Call("flickr.people.getPhotos", params)
 	if err != nil {
@@ -516,11 +894,25 @@ func (c *Client) GetPhotosPage(userID string, page, perPage int) ([]Photo, error
 	return parsePhotoList(photosObj), nil
 }
 
+// PhotoUploadTime ritorna quando la foto è stata caricata su Flickr.
+func (c *Client) PhotoUploadTime(photoID string) (time.Time, error) {
+	info, err := c.getPhotoInfo(photoID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	raw, _ := info["dateuploaded"].(string)
+	secs, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("photo %s: no valid dateuploaded in getInfo: %w", photoID, err)
+	}
+	return time.Unix(secs, 0), nil
+}
+
 // GetPhotosetPhotos restituisce le foto di un album (photoset) specifico.
 func (c *Client) GetPhotosetPhotos(photosetID string, page, perPage int) ([]Photo, error) {
 	params := map[string]string{
 		"photoset_id": photosetID,
-		"extras":      "tags",
+		"extras":      "tags,media,content_type",
 		"page":        strconv.Itoa(page),
 		"per_page":    strconv.Itoa(perPage),
 	}
@@ -532,19 +924,65 @@ func (c *Client) GetPhotosetPhotos(photosetID string, page, perPage int) ([]Phot
 	return parsePhotoList(photosetObj), nil
 }
 
+// GetPhoto fetches a single photo's ID/Title/Tags directly via getInfo,
+// instead of from a paginated listing — used by tools that target one or
+// a handful of specific photo IDs (e.g. cmd/scanner's --photo-ids) rather
+// than scanning the whole photostream.
+func (c *Client) GetPhoto(photoID string) (Photo, error) {
+	info, err := c.getPhotoInfo(photoID)
+	if err != nil {
+		return Photo{}, err
+	}
+	titleObj, _ := info["title"].(map[string]interface{})
+	rawTitle, _ := titleObj["_content"].(string)
+	title := html.UnescapeString(rawTitle)
+
+	tagsObj, _ := info["tags"].(map[string]interface{})
+	rawList, _ := tagsObj["tag"].([]interface{})
+	tags := make([]string, 0, len(rawList))
+	for _, item := range rawList {
+		t, _ := item.(map[string]interface{})
+		if raw, ok := t["raw"].(string); ok {
+			tags = append(tags, html.UnescapeString(raw))
+		}
+	}
+
+	media, _ := info["media"].(string)
+	return Photo{ID: photoID, Title: title, Tags: tags, Media: media}, nil
+}
+
+var contentTypeNames = map[string]string{"0": "Photo", "1": "Screenshot", "2": "Other"}
+
+// contentTypeString reads extras=content_type, which Flickr returns
+// inconsistently as either a JSON string ("0") or a JSON number (0)
+// depending on the endpoint.
+func contentTypeString(v interface{}) string {
+	switch t := v.(type) {
+	case string:
+		return contentTypeNames[t]
+	case float64:
+		return contentTypeNames[strconv.Itoa(int(t))]
+	default:
+		return ""
+	}
+}
+
 func parsePhotoList(container map[string]interface{}) []Photo {
 	rawList, _ := container["photo"].([]interface{})
 	photos := make([]Photo, 0, len(rawList))
 	for _, item := range rawList {
 		p, _ := item.(map[string]interface{})
 		id, _ := p["id"].(string)
-		title, _ := p["title"].(string)
+		rawTitle, _ := p["title"].(string)
+		title := html.UnescapeString(rawTitle)
 		rawTags, _ := p["tags"].(string)
+		media, _ := p["media"].(string)
+		contentType := contentTypeString(p["content_type"])
 		tags := []string{}
 		if rawTags != "" {
 			tags = strings.Split(rawTags, " ")
 		}
-		photos = append(photos, Photo{ID: id, Title: title, Tags: tags})
+		photos = append(photos, Photo{ID: id, Title: title, Tags: tags, Media: media, ContentType: contentType})
 	}
 	return photos
 }
@@ -618,7 +1056,7 @@ func (c *Client) GetPhotoDescription(photoID string) (string, error) {
 	}
 	desc, _ := info["description"].(map[string]interface{})
 	content, _ := desc["_content"].(string)
-	return content, nil
+	return html.UnescapeString(content), nil
 }
 
 func (c *Client) SetDescription(photoID, description string) error {
@@ -633,6 +1071,7 @@ func (c *Client) SetDescription(photoID, description string) error {
 		"title":       title,
 		"description": description,
 	})
+	c.invalidatePhotoInfo(photoID)
 	return err
 }
 
@@ -641,6 +1080,7 @@ func (c *Client) AddTag(photoID, tag string) error {
 		"photo_id": photoID,
 		"tags":     "\"" + tag + "\"",
 	})
+	c.invalidatePhotoInfo(photoID)
 	return err
 }
 
@@ -673,5 +1113,6 @@ func (c *Client) RemoveTag(photoID, tagID string) error {
 		"photo_id": photoID,
 		"tag_id":   tagID,
 	})
+	c.invalidatePhotoInfo(photoID)
 	return err
 }

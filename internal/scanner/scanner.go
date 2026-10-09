@@ -9,14 +9,20 @@
 package scanner
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"html"
+	"math"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"motionphotos/internal/flickrclient"
 	"motionphotos/internal/motiondetect"
+	"motionphotos/internal/plausible"
 	"motionphotos/internal/sitegen"
 	"motionphotos/internal/statestore"
 )
@@ -25,10 +31,70 @@ import (
 // shows around the photo's coordinates.
 const mapEmbedDelta = 0.005
 
+// privateGeoZones are places whose exact location shouldn't be published on
+// a public viewer page (home, recurring vacation spot). A photo whose
+// coordinates fall within radiusKM of one of these is treated as "no geo
+// data" for display purposes — the map block is simply omitted.
+var privateGeoZones = []struct {
+	name     string
+	lat, lon float64
+	radiusKM float64
+}{
+	{"home (Vicopisano, Pisa)", 43.7139, 10.6459, 15},
+	{"vacation (Costa Rei)", 39.1800, 9.6360, 20},
+}
+
+// haversineKM returns the great-circle distance between two lat/lon points
+// in kilometers.
+func haversineKM(lat1, lon1, lat2, lon2 float64) float64 {
+	const earthRadiusKM = 6371.0
+	rad := math.Pi / 180
+	dLat := (lat2 - lat1) * rad
+	dLon := (lon2 - lon1) * rad
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(lat1*rad)*math.Cos(lat2*rad)*math.Sin(dLon/2)*math.Sin(dLon/2)
+	return earthRadiusKM * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+}
+
+// matchedPrivateZone returns the name of the privateGeoZones entry the
+// coordinates fall inside, or "" if none match.
+func matchedPrivateZone(lat, lon float64) string {
+	for _, zone := range privateGeoZones {
+		if haversineKM(lat, lon, zone.lat, zone.lon) <= zone.radiusKM {
+			return zone.name
+		}
+	}
+	return ""
+}
+
+func isPrivateGeoZone(lat, lon float64) bool {
+	return matchedPrivateZone(lat, lon) != ""
+}
+
+// DescribeGeoPrivacy reports, for logging, why BuildMapEmbedURL did or
+// didn't show a photo's map: "shown", "hidden:<zone name>" for a private
+// zone, or "invalid" for unparsable coordinates.
+func DescribeGeoPrivacy(lat, lon string) string {
+	latF, err := strconv.ParseFloat(lat, 64)
+	if err != nil {
+		return "invalid"
+	}
+	lonF, err := strconv.ParseFloat(lon, 64)
+	if err != nil {
+		return "invalid"
+	}
+	if zone := matchedPrivateZone(latF, lonF); zone != "" {
+		return "hidden:" + zone
+	}
+	return "shown"
+}
+
 // BuildMapEmbedURL builds an OpenStreetMap embed URL (no API key needed,
-// unlike Google Maps) centered on lat/lon, with a marker. Returns an error
-// if lat/lon aren't valid floats — callers should treat that as "skip the
-// map", not fail the whole publish.
+// unlike Google Maps) centered on lat/lon, with a marker. Returns "", nil
+// (not an error) when the coordinates fall inside a privateGeoZones entry,
+// so the map is silently omitted rather than exposing home/vacation
+// locations. Returns an error if lat/lon aren't valid floats — callers
+// should treat that as "skip the map", not fail the whole publish.
 func BuildMapEmbedURL(lat, lon string) (string, error) {
 	latF, err := strconv.ParseFloat(lat, 64)
 	if err != nil {
@@ -37,6 +103,9 @@ func BuildMapEmbedURL(lat, lon string) (string, error) {
 	lonF, err := strconv.ParseFloat(lon, 64)
 	if err != nil {
 		return "", err
+	}
+	if isPrivateGeoZone(latF, lonF) {
+		return "", nil
 	}
 	return fmt.Sprintf(
 		"https://www.openstreetmap.org/export/embed.html?bbox=%f,%f,%f,%f&marker=%f,%f",
@@ -51,7 +120,7 @@ const statusTagPrefix = "flickrmp:status="
 // owner's original caption (if any) for display on the viewer page — showing
 // our own "watch the video" sentence back on the very page that IS the video
 // would be circular.
-const motionPhotoSentencePrefix = "This is a Motion Photo — watch the video: "
+const motionPhotoSentencePrefix = "This is a Motion Photo — "
 
 // StripOwnSentence returns desc with our own appended sentence (and the
 // blank line before it) removed, leaving only the photo owner's original
@@ -77,8 +146,11 @@ type Reader interface {
 	GetPhotoExif(photoID string) (flickrclient.PhotoExif, error)
 	GetPhotoFavoritesCount(photoID string) (string, error)
 	GetPhotoGeo(photoID string) (lat, lon string, hasGeo bool, err error)
-	GetPhotoGroups(photoID string) ([]string, error)
-	GetPhotoPeople(photoID string) ([]string, error)
+	GetPhotoGroups(photoID string) ([]flickrclient.Group, error)
+	GetPhotoAlbums(photoID string) ([]flickrclient.Album, error)
+	GetPhotoPeople(photoID string) ([]flickrclient.Person, error)
+	GetPhotoComments(photoID string) ([]flickrclient.Comment, error)
+	IsFullyPrivate(photoID string) (bool, error)
 }
 
 // Writer scrive metadati su Flickr (setMeta/addTags). L'implementazione
@@ -102,6 +174,37 @@ type Publisher interface {
 // detectMotionPhotoFunc è iniettabile nei test.
 var detectMotionPhotoFunc = motiondetect.DetectMotionPhoto
 
+// getPageViewsFunc è nil finché EnablePlausible non viene chiamata (feature
+// opzionale: senza chiave configurata, PageViews resta vuoto e la riga
+// stats semplicemente non la mostra).
+var getPageViewsFunc func(path string) (visitors, pageviews int, err error)
+
+// EnablePlausible collega le letture di pageview da Plausible per la riga
+// stats della pagina (distinte dal contatore "Views" di Flickr, che conta
+// le visite alla FOTO su Flickr, non a questa pagina). Opzionale — se non
+// chiamata, il campo PageViews resta sempre vuoto.
+func EnablePlausible(apiKey, siteID string) {
+	getPageViewsFunc = func(path string) (int, int, error) {
+		return plausible.GetPageViews(apiKey, siteID, path)
+	}
+}
+
+// generateToken produces a random 128-bit hex string used as the public R2
+// key for a photo's video/page — unlike the Flickr photo ID (sequential,
+// same one printed in the public flickr.com photo URL), this can't be
+// guessed or enumerated by timing correlation.
+func generateToken() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// generateTokenFunc è iniettabile nei test per rendere deterministico il
+// token usato (altrimenti casuale ad ogni chiamata).
+var generateTokenFunc = generateToken
+
 func alreadyTagged(tags []string) bool {
 	for _, t := range tags {
 		if strings.HasPrefix(t, statusTagPrefix) {
@@ -112,68 +215,159 @@ func alreadyTagged(tags []string) bool {
 }
 
 // ProcessPhoto valuta una singola foto. Ritorna uno status descrittivo:
-// "skipped" (già nota, da Flickr tag o da cache locale), "checked"/"lost"/
-// "published" (esito del rilevamento), "blocked-no-oauth" quando l'originale
-// non è scaricabile senza un access token OAuth, o "download-error" per un
-// fallimento di rete/CDN transitorio (es. 502 da live.staticflickr.com).
-// Nessuno dei due casi di errore è fatale né viene salvato in cache: si
-// ritenta al prossimo run.
-func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Publisher, store statestore.Store, template, username string, photo flickrclient.Photo) (string, error) {
+// "skipped" (già nota, da Flickr tag, da cache locale, o perché è un video
+// Flickr nativo — mai una Motion Photo), "checked"/"lost"/
+// "published" (esito del rilevamento — include public, friends e family:
+// vedi IsFullyPrivate), "blocked-no-oauth" quando l'originale non è
+// scaricabile senza un access token OAuth, "download-error" per un
+// fallimento di rete/CDN transitorio (es. 502 da live.staticflickr.com),
+// "ready(private)" quando è motion ma la foto è ancora completamente
+// privata (video estratto e già su R2, pagina NON pubblicata), o
+// "skipped(still-private)" per un "ready(private)" ricontrollato che lo è
+// ancora. Nessuno dei due casi di errore transitorio è fatale né viene
+// salvato in cache: si ritenta al prossimo run. viewerURL è non vuoto solo
+// quando status è "published" — utile per il logging del chiamante.
+func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Publisher, store statestore.Store, template, username string, photo flickrclient.Photo) (status string, viewerURL string, err error) {
 	if alreadyTagged(photo.Tags) {
-		return "skipped(flickr-tag)", nil
+		return "skipped(flickr-tag)", "", nil
 	}
-	if _, ok := store.Get(photo.ID); ok {
-		return "skipped(cache)", nil
+
+	// A genuine Flickr video upload (media=="video") can never be a Pixel
+	// Motion Photo (JPEG with an embedded clip, media=="photo") — skip
+	// before attempting a download that's guaranteed to fail. Free to
+	// check: Media comes from the listing call itself, no extra API cost.
+	// Not cached/tagged: this comes from the listing every run regardless.
+	if photo.Media == "video" {
+		return "skipped(video)", "", nil
+	}
+
+	if rec, ok := store.Get(photo.ID); ok {
+		if rec.Status != "ready-private" {
+			return "skipped(cache)", "", nil
+		}
+		fullyPrivate, err := reader.IsFullyPrivate(photo.ID)
+		if err != nil {
+			return "", "", err
+		}
+		if fullyPrivate {
+			return "skipped(still-private)", "", nil
+		}
+		return finishPublish(reader, writer, publisher, store, template, username, photo, rec.VideoURL, rec.Token)
 	}
 
 	jpegBytes, err := reader.GetPhotoOriginalBytes(photo.ID)
 	if err != nil {
 		if errors.Is(err, flickrclient.ErrOriginalNotAvailable) {
-			return "blocked-no-oauth", nil
+			return "blocked-no-oauth", "", nil
 		}
-		return "download-error", nil //nolint:nilerr // transitorio (rete/CDN): si ritenta al prossimo run, non è un errore dello scanner
+		return "download-error", "", nil //nolint:nilerr // transitorio (rete/CDN): si ritenta al prossimo run, non è un errore dello scanner
 	}
 
 	result := detectMotionPhotoFunc(jpegBytes)
 
 	if !result.IsMotion {
 		if err := store.Set(photo.ID, statestore.Record{Status: result.Reason}); err != nil {
-			return "", err
+			return "", "", err
 		}
 		if err := writer.AddTag(photo.ID, statusTagPrefix+result.Reason); err != nil {
-			return "", err
+			return "", "", err
 		}
-		return result.Reason, nil
+		return result.Reason, "", nil
 	}
 
-	videoURL, err := uploader.UploadVideo(photo.ID, result.VideoBytes)
+	// Token, non l'ID Flickr (sequenziale e prevedibile), è la chiave
+	// pubblica del video/pagina — vedi generateToken.
+	token, err := generateTokenFunc()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
+	videoURL, err := uploader.UploadVideo(token, result.VideoBytes)
+	if err != nil {
+		return "", "", err
+	}
+
+	fullyPrivate, err := reader.IsFullyPrivate(photo.ID)
+	if err != nil {
+		return "", "", err
+	}
+	if fullyPrivate {
+		// Video already extracted and uploaded — cheap to finish publishing
+		// later (IsFullyPrivate check only, no re-download) once the owner
+		// makes the photo at least friends/family visible. Not tagged:
+		// alreadyTagged must stay false so this photo keeps getting the
+		// cheap recheck each run.
+		if err := store.Set(photo.ID, statestore.Record{Status: "ready-private", VideoURL: videoURL, Token: token}); err != nil {
+			return "", "", err
+		}
+		return "ready(private)", "", nil
+	}
+
+	return finishPublish(reader, writer, publisher, store, template, username, photo, videoURL, token)
+}
+
+// finishPublish renders and publishes the viewer page for a motion photo
+// whose video is already on R2 (videoURL, at key token), then writes the
+// description link and status tag. Shared by ProcessPhoto's direct-publish
+// path and its "was private, now at least friends/family" resume path.
+// Publishing at this point is safe for a friends/family-only photo too:
+// whoever can already see its Flickr description (Flickr's own access
+// control) gets the link, same trust boundary Flickr already drew — the
+// token keeps the URL from being guessed by anyone else.
+func finishPublish(reader Reader, writer Writer, publisher Publisher, store statestore.Store, template, username string, photo flickrclient.Photo, videoURL, token string) (string, string, error) {
 	imageURL, err := reader.GetPhotoDisplayURL(photo.ID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	details, err := reader.GetPhotoDetails(photo.ID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	// EXIF and everything below is supplementary (the "additional
-	// information" panel, map, groups, people): each degrades gracefully
-	// on its own if it fails, instead of failing the whole publish — e.g.
-	// getExif/getFavorites/etc. reject anonymous (unauthenticated) calls,
-	// and getGeo "fails" for any non-geotagged photo (the common case).
+	// information" panel, map, groups, people, albums, comments): each
+	// degrades gracefully on its own if it fails, instead of failing the
+	// whole publish — e.g. getExif/getFavorites/etc. reject anonymous
+	// (unauthenticated) calls, and getGeo "fails" for any non-geotagged
+	// photo (the common case).
 	exif, _ := reader.GetPhotoExif(photo.ID)
 	favorites, _ := reader.GetPhotoFavoritesCount(photo.ID)
-	groups, _ := reader.GetPhotoGroups(photo.ID)
-	people, _ := reader.GetPhotoPeople(photo.ID)
+	rawGroups, _ := reader.GetPhotoGroups(photo.ID)
+	rawAlbums, _ := reader.GetPhotoAlbums(photo.ID)
+	flickrclient.BuildAlbumURL(rawAlbums, username)
+	rawPeople, _ := reader.GetPhotoPeople(photo.ID)
+	rawComments, _ := reader.GetPhotoComments(photo.ID)
+
+	groups := make([]sitegen.GroupInfo, 0, len(rawGroups))
+	for _, g := range rawGroups {
+		groups = append(groups, sitegen.GroupInfo{Title: g.Title, IconURL: g.IconURL, URL: g.URL, ItemCount: g.ItemCount})
+	}
+	albums := make([]sitegen.AlbumInfo, 0, len(rawAlbums))
+	for _, a := range rawAlbums {
+		albums = append(albums, sitegen.AlbumInfo{Title: a.Title, CoverURL: a.CoverURL, URL: a.URL, ItemCount: a.ItemCount})
+	}
+	people := make([]sitegen.PersonInfo, 0, len(rawPeople))
+	for _, p := range rawPeople {
+		people = append(people, sitegen.PersonInfo{Username: p.Username, IconURL: p.IconURL, ProfileURL: p.ProfileURL})
+	}
+	commentList := make([]sitegen.CommentInfo, 0, len(rawComments))
+	for _, c := range rawComments {
+		commentList = append(commentList, sitegen.CommentInfo{Author: c.Author, IconURL: c.IconURL, ProfileURL: c.ProfileURL, Text: c.Text, Date: c.Date})
+	}
 
 	var mapEmbedURL string
 	if lat, lon, hasGeo, geoErr := reader.GetPhotoGeo(photo.ID); geoErr == nil && hasGeo {
 		mapEmbedURL, _ = BuildMapEmbedURL(lat, lon)
+		fmt.Printf("%s\t%s\tgeo=%s,%s\tmap=%s\n", time.Now().Format("15:04:05"), photo.ID, lat, lon, DescribeGeoPrivacy(lat, lon))
+	}
+
+	var pageViews string
+	if getPageViewsFunc != nil {
+		path := fmt.Sprintf("/photos/%s/%s.html", username, photo.ID)
+		if _, views, pvErr := getPageViewsFunc(path); pvErr == nil {
+			pageViews = strconv.Itoa(views)
+		}
 	}
 
 	// Fetched before rendering: the page shows the owner's *original*
@@ -182,10 +376,10 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 	// the same value is reused below for the idempotent description check.
 	currentDescription, err := reader.GetPhotoDescription(photo.ID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
-	html, err := sitegen.RenderPhotoPage(template, sitegen.PageData{
+	pageHTML, err := sitegen.RenderPhotoPage(template, sitegen.PageData{
 		PhotoID:          photo.ID,
 		Title:            photo.Title,
 		ImageURL:         imageURL,
@@ -198,44 +392,62 @@ func ProcessPhoto(reader Reader, writer Writer, uploader Uploader, publisher Pub
 		DateUploaded:     details.DateUploaded,
 		Tags:             details.Tags,
 		Views:            details.Views,
+		PageViews:        pageViews,
 		Comments:         details.Comments,
 		Favorites:        favorites,
 		LicenseName:      details.LicenseName,
 		LicenseURL:       details.LicenseURL,
 		MapEmbedURL:      mapEmbedURL,
 		Groups:           groups,
+		Albums:           albums,
 		People:           people,
+		CommentList:      commentList,
 		Camera:           exif.Camera,
 		ExposureTime:     exif.ExposureTime,
 		FNumber:          exif.FNumber,
 		ISO:              exif.ISO,
 		FocalLength:      exif.FocalLength,
+		ContentType:      photo.ContentType,
+		SafetyLevel:      details.SafetyLevel,
+		ViewPrivacy:      details.ViewPrivacy,
+		CommentPerm:      details.CommentPerm,
+		AddMetaPerm:      details.AddMetaPerm,
 	})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
-	viewerURL, err := publisher.PublishPage(photo.ID, html)
+	viewerURL, err := publisher.PublishPage(token, pageHTML)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	if !strings.Contains(currentDescription, viewerURL) {
 		descriptionLinkURL := viewerURL + "?utm_source=flickr&utm_medium=description&utm_campaign=motion_photo&utm_content=" + url.QueryEscape(username)
-		sentence := "This is a Motion Photo — watch the video: " + descriptionLinkURL
-		newDescription := strings.TrimSpace(currentDescription + "\n\n" + sentence)
+		sentence := motionPhotoSentencePrefix + `<a href="` + html.EscapeString(descriptionLinkURL) + `" rel="noreferrer nofollow">watch the video</a>`
+		// StripOwnSentence first: currentDescription may already carry an
+		// older version of our own sentence (a previous link that's now
+		// stale/dead, e.g. a reprocessed orphaned-video photo) — without
+		// this, appending blindly leaves both the dead old sentence and
+		// the new one in the description.
+		originalCaption := StripOwnSentence(currentDescription)
+		newDescription := strings.TrimSpace(originalCaption)
+		if newDescription != "" {
+			newDescription += "\n\n"
+		}
+		newDescription += sentence
 		if err := writer.SetDescription(photo.ID, newDescription); err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
 
 	if err := writer.AddTag(photo.ID, statusTagPrefix+"published"); err != nil {
-		return "", err
+		return "", "", err
 	}
-	if err := store.Set(photo.ID, statestore.Record{Status: "published"}); err != nil {
-		return "", err
+	if err := store.Set(photo.ID, statestore.Record{Status: "published", Token: token}); err != nil {
+		return "", "", err
 	}
-	return "published", nil
+	return "published", viewerURL, nil
 }
 
 // Run scansiona tutte le pagine di foto dell'utente fino a limit (limit < 0
@@ -255,11 +467,11 @@ func Run(reader Reader, writer Writer, uploader Uploader, publisher Publisher, s
 			if limit >= 0 && processed >= limit {
 				break
 			}
-			status, err := ProcessPhoto(reader, writer, uploader, publisher, store, template, username, photo)
+			status, viewerURL, err := ProcessPhoto(reader, writer, uploader, publisher, store, template, username, photo)
 			if err != nil {
 				return fmt.Errorf("photo %s: %w", photo.ID, err)
 			}
-			fmt.Printf("%s\t%s\t%s\n", photo.ID, status, photo.Title)
+			fmt.Printf("%s\t%s\t%s\t%s\t%s\n", time.Now().Format("15:04:05"), photo.ID, status, photo.Title, viewerURL)
 			if !strings.HasPrefix(status, "skipped") {
 				processed++
 			}

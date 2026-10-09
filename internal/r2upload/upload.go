@@ -8,6 +8,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -51,24 +53,66 @@ func PutObject(ctx context.Context, client PutObjectAPI, bucket, publicBaseURL, 
 }
 
 // VideoUploader/PageUploader adapt PutObject to the scanner's Uploader/
-// Publisher interfaces (see internal/scanner).
+// Publisher interfaces (see internal/scanner). Both just take a key —
+// the scanner passes it a per-photo random token (see
+// scanner.generateToken), not the Flickr photo ID, so the public URL can't
+// be guessed/enumerated; some photos published before that change still
+// use their plain Flickr ID as the key (never migrated, no functional
+// difference for genuinely public photos).
 
+// VideoUploader keeps a flat "<key>.mp4" — it's never user-facing (only
+// referenced from inside the generated page's <video src>), and every
+// video already published this session lives at that flat path; adding a
+// username prefix here would silently orphan them all without a bucket
+// copy/migration this project doesn't do.
 type VideoUploader struct {
 	Client        PutObjectAPI
 	Bucket        string
 	PublicBaseURL string
 }
 
-func (u VideoUploader) UploadVideo(photoID string, videoBytes []byte) (string, error) {
-	return PutObject(context.Background(), u.Client, u.Bucket, u.PublicBaseURL, photoID+".mp4", "video/mp4", videoBytes)
+func (u VideoUploader) UploadVideo(key string, videoBytes []byte) (string, error) {
+	return PutObject(context.Background(), u.Client, u.Bucket, u.PublicBaseURL, key+".mp4", "video/mp4", videoBytes)
 }
 
+// PageUploader is user-facing (linked from the Flickr description), so its
+// key mirrors Flickr's own URL scheme (photos/<username>/<key>) — this
+// organizes the bucket per-user ahead of any future multi-account use.
 type PageUploader struct {
 	Client        PutObjectAPI
 	Bucket        string
 	PublicBaseURL string
+	Username      string
 }
 
-func (p PageUploader) PublishPage(photoID, html string) (string, error) {
-	return PutObject(context.Background(), p.Client, p.Bucket, p.PublicBaseURL, "p/"+photoID+".html", "text/html; charset=utf-8", []byte(html))
+func (p PageUploader) PublishPage(key, html string) (string, error) {
+	objectKey := fmt.Sprintf("photos/%s/%s.html", p.Username, key)
+	return PutObject(context.Background(), p.Client, p.Bucket, p.PublicBaseURL, objectKey, "text/html; charset=utf-8", []byte(html))
+}
+
+// UploadStaticAssets pushes site/style.css and site/script.js to the bucket
+// root ("/style.css", "/script.js") — the CSS/JS every viewer page links to
+// instead of embedding inline, so a page-only change doesn't need every
+// published page re-rendered, and a shared-asset change doesn't need
+// touching the pages at all. Called once per run (cmd/scanner,
+// cmd/republish), cheap: two PutObject calls, not per-photo.
+func UploadStaticAssets(ctx context.Context, client PutObjectAPI, bucket, publicBaseURL, repoRoot string) error {
+	assets := []struct {
+		file        string
+		key         string
+		contentType string
+	}{
+		{"style.css", "style.css", "text/css; charset=utf-8"},
+		{"script.js", "script.js", "application/javascript; charset=utf-8"},
+	}
+	for _, a := range assets {
+		data, err := os.ReadFile(filepath.Join(repoRoot, "site", a.file))
+		if err != nil {
+			return fmt.Errorf("reading %s: %w", a.file, err)
+		}
+		if _, err := PutObject(ctx, client, bucket, publicBaseURL, a.key, a.contentType, data); err != nil {
+			return fmt.Errorf("uploading %s: %w", a.file, err)
+		}
+	}
+	return nil
 }
